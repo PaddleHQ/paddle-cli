@@ -1,0 +1,315 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Run code validation checks
+
+on:
+  merge_group:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  security-events: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  validate:
+    name: Run code validation checks
+    runs-on: go-4-core
+    timeout-minutes: 20
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0 # fetch all history to allow diff
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        id: setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: validate
+
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            govulncheck
+            modernize
+            modfmt
+            ghokin
+
+      #  --
+      # Resolve scope
+      #
+      # Regular PRs and merge_group: scope to the diff against the base ref.
+      # Template-sync PRs (origin:go-library-template, origin:example-service)
+      # skip this step and fall through to full scope via `|| '.'` defaults
+      # below — tool version bumps may surface issues in untouched files.
+
+      - name: Resolve validate scope
+        id: scope
+        if: |-
+          !contains(github.event.pull_request.labels.*.name, 'origin:go-library-template') &&
+          !contains(github.event.pull_request.labels.*.name, 'origin:example-service')
+        env:
+          BASE_REF: ${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref }}
+        run: |
+          base_ref="${BASE_REF#refs/heads/}"
+          base_sha=$(git merge-base "origin/${base_ref}" HEAD)
+
+          changed_go_files=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.go')
+          changed_features=$(git diff --name-only --diff-filter=d "$base_sha"..HEAD -- '*.feature')
+
+          # Detect changes that may affect generated ERDs (schema2mermaid).
+          # Heuristic: any *.sql migration, or any file under a `schema/`
+          # directory. False positives (e.g. an unrelated `schema/` dir for
+          # JSON schemas) just mean we re-run DB setup unnecessarily; the
+          # Go Generate step uses a more precise import-based filter to
+          # decide which packages actually need a DB.
+          schema_changed=false
+          if git diff --name-only --diff-filter=d "$base_sha"..HEAD | grep -qE '\.sql$|(^|/)schema/'; then
+            schema_changed=true
+          fi
+
+          # govulncheck's input is (go.sum, vuln-db, reachability); if
+          # go.sum hasn't moved vs base, main's last run already covered it.
+          gosum_changed=false
+          if git diff --name-only --diff-filter=d "$base_sha"..HEAD | grep -qE '(^|/)go\.sum$'; then
+            gosum_changed=true
+          fi
+
+          go_files=$(printf '%s' "$changed_go_files" | tr '\n' ' ')
+          feature_files=$(printf '%s' "$changed_features" | tr '\n' ' ')
+
+          go_pkgs=$(printf '%s' "$changed_go_files" | awk -F/ '
+            NF == 0 { next }
+            NF == 1 { print "./"; next }
+            { OFS="/"; NF--; print "./" $0 }
+          ' | sort -u | tr '\n' ' ')
+
+          {
+            echo "go_files=${go_files}"
+            echo "go_pkgs=${go_pkgs}"
+            echo "feature_files=${feature_files}"
+            echo "schema_changed=${schema_changed}"
+            echo "gosum_changed=${gosum_changed}"
+          } >> "$GITHUB_OUTPUT"
+
+      #  --
+      # Setup test databases — only when the diff might affect ERD output.
+      # Template-sync PRs (scope skipped) get setup as a safety net so
+      # tool-version bumps re-run schema2mermaid against a fresh DB.
+
+      - name: Setup test databases
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.schema_changed == 'true'
+        uses: ./.github/actions/setup-databases
+
+      #  --
+      # Run validations
+
+      - name: Verify dependencies
+        run: go mod verify
+
+      - name: Validate go.mod
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          go mod tidy -go=${{ steps.setup-go.outputs.go-mod-version }}
+          git diff --exit-code || \
+            (
+              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect dependencies::Please run "go mod tidy"' \
+              && exit 1
+            )
+
+      - name: Check for toolchain
+        run: |
+          LINE=$(grep -n 'toolchain go' go.mod | cut -f1 -d:)
+          if [ -n "$LINE" ]; then
+            echo "::error file=go.mod,line=$LINE,endLine=$LINE,title=Toolchain::go.mod contains a toolchain directive. This should be removed before merge"
+            exit 1
+          fi
+
+      - name: Validate go.mod blocks
+        env:
+          GOTOOLCHAIN: local
+        run: |
+          modfmt --check || \
+            (
+              echo '::error file=go.mod,line=1,endLine=1,title=Incorrect formatting of go.mod::Please run "go run github.com/abhijit-hota/modfmt@latest --in-place"' \
+              && exit 1
+            )
+
+      - name: Go Format
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_files != ''
+        run: |
+          gofmt -s -w ${{ steps.scope.outputs.go_files || '.' }}
+          git diff --exit-code ||
+            (echo '::error title=Incorrect Go Format::Please run "gofmt -s -w ."' && exit 1)
+
+      # Two mutually-exclusive variants, gated by YAML `if:`. Exactly one
+      # runs: the full variant on template-sync PRs (scope skipped) or
+      # schema-affecting changes; the filtered variant otherwise.
+
+      - name: Go Generate
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.schema_changed == 'true'
+        run: |
+          go generate ./...
+          git diff --exit-code || \
+            (echo '::error title=Incorrect Generated Files::Please run "go generate ./..."' && exit 1)
+
+      - name: Go Generate (skip schema-mermaid pkgs)
+        if: steps.scope.outputs.schema_changed == 'false'
+        run: |
+          # `pipefail` so a failing `go list` surfaces as a step failure
+          # rather than silently producing empty $pkgs and confusing
+          # `go generate` with no args.
+          set -o pipefail
+          # Skip generators that need a live DB (importers of `schema2mermaid`
+          # — only ERD generators across PaddleHQ services). Other generators
+          # (mockery etc.) still run. Filter targets schema2mermaid *imports*
+          # rather than a path glob like `schema/` so packages such as
+          # `internal/handler/schema` (JSON schema, no DB) keep running.
+          pkgs=$(go list -f '{{.ImportPath}} {{join .Imports " "}}' ./... \
+            | grep -v 'schema2mermaid' \
+            | awk '{print $1}')
+          # shellcheck disable=SC2086 # intentional word-splitting on space-separated pkg list
+          go generate $pkgs
+          git diff --exit-code || \
+            (echo '::error title=Incorrect Generated Files::Please run "go generate ./..."' && exit 1)
+
+      - name: Check feature file formatting
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.feature_files != ''
+        run: |
+          [ -d "features/" ] || exit 0
+          ghokin_version=$(jq -r '.tools.ghokin.version' tool-versions.json)
+          ghokin check features/ || \
+            (echo "::error title=Incorrect feature file formatting::Please run \"go run github.com/PaddleHQ/ghokin/v4@${ghokin_version} fmt replace features/\" to fix" && exit 1)
+
+      # --
+      # Go Vulncheck
+
+      - name: Run `govulncheck`
+        id: govulncheck
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true'
+        shell: bash {0} # disable fast fail / set -e
+        run: |
+          result=$(govulncheck ./...)
+          retVal=$?
+          if [ ${retVal} -ne 0 ]; then
+            {
+              echo 'result<<EOF'
+              echo "${result}" | awk '{print "> "$0}'
+              echo EOF
+            } >> "$GITHUB_OUTPUT"
+          fi
+
+      # Same gating as govulncheck above so an existing vuln comment isn't
+      # deleted by a subsequent non-gosum-touching push.
+      - name: Comment PR with vulnerabilities
+        if: |
+          github.event_name == 'pull_request' &&
+          (steps.scope.conclusion == 'skipped' || steps.scope.outputs.gosum_changed == 'true')
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: govulncheck
+          mode: ${{ steps.govulncheck.outputs.result != '' && 'upsert' || 'delete' }}
+          message: |
+            > [!IMPORTANT]
+            > ## :warning: Found vulnerabilities :warning:
+            > ```
+            ${{ steps.govulncheck.outputs.result }}
+            > ```
+
+      # --
+      # Gopls
+
+      - name: Run `modernize (part of gopls)`
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_pkgs != ''
+        run: |
+          modernize -test ${{ steps.scope.outputs.go_pkgs || './...' }} 2>&1 | awk -F ":" '{print "::notice file="$1",line="$2",title=gopls: "$4"::Use `go run golang.org/x/tools/gopls/internal/analysis/modernize/cmd/modernize@latest -test -fix ./...` to automatically fix"}'
+
+      - name: Vet
+        if: steps.scope.conclusion == 'skipped' || steps.scope.outputs.go_pkgs != ''
+        run: go vet ${{ steps.scope.outputs.go_pkgs || './...' }}
+
+      # --
+      # Breaking changes
+
+      - name: Check for multiple major versions of dependencies
+        run: |
+          if git diff --quiet "origin/${{ github.event.repository.default_branch }}" -- 'go.mod'; then
+            echo "No changes in go.mod - skipping validation of major changes"
+            exit 0
+          fi
+
+          # 1. get all PaddleHQ dependencies
+          # 2. change : to space
+          # 3. remove anything after the last space
+          # 4. remove /v[0-9] from the end of the line
+          # 5. sort by dependency name
+          # 6. find duplicates
+          # 7. print line number and dependency name
+          DUPLICATES=$(\
+            grep -Eon "github.com\/PaddleHQ\/[0-9a-z\-]+.*\s" go.mod \
+            | sed 's/:/ /' \
+            | awk '{print $1 " " $2}' \
+            | sed 's/\/v[0-9]$//' \
+            | sort -k2 \
+            | uniq -f1 -cd \
+            | awk '{print $2 " " $3}' \
+          )
+
+          if [ -n "${DUPLICATES}" ]; then
+            echo "${DUPLICATES}" | while read -r line ; do
+                LINE=$(echo "$line" | cut -f1 -d ' ')
+                REPO=$(echo "$line" | cut -f2 -d ' ')
+
+                cat <<- EOF
+          ::error file=go.mod,line=${LINE},endLine=${LINE},title=Duplicate dependencies::There are multiple \
+          different major versions of ${REPO} in this repo. This may cause problems. We strongly recommend \
+          reaching out to the AppEx team to discuss before merging.
+          EOF
+            done
+          fi
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always() && needs.validate.result != 'skipped'
+    needs: [validate]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
