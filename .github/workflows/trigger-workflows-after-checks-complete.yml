@@ -1,0 +1,82 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Trigger workflows after Checks complete
+
+# This workflow triggers other workflows after external checks complete
+on:
+  check_run:
+    types:
+      - completed
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.check_run.head_sha }}
+  cancel-in-progress: true
+
+permissions: {}
+
+jobs:
+  trigger_workflows_after_checks_complete:
+    name: Trigger workflows after Checks complete
+    runs-on: generic-2-core
+    timeout-minutes: 30
+    permissions:
+      actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.check_run.head_sha }}
+          persist-credentials: false
+
+      - name: Get Pull Request Information
+        id: get_pr
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          HEAD_SHA: ${{ github.event.check_run.head_sha }}
+        run: |
+          # Treat an empty or failed PR lookup the same as "no PR": default to
+          # `{}` so the downstream `event` payload stays valid JSON.
+          PR_DATA=$(gh api "repos/${REPOSITORY}/commits/${HEAD_SHA}/pulls" --jq '.[0] // empty' || true)
+          if [ -z "$PR_DATA" ] || [ "$PR_DATA" = "null" ]; then
+            echo "No pull request found for this commit"
+            echo "pr_data={}" >> "$GITHUB_OUTPUT"
+          else
+            echo "pr_data=$PR_DATA" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Automerge
+        if: steps.get_pr.outputs.pr_data != '{}'
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: '{"pull_request":${{ steps.get_pr.outputs.pr_data }}}'
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: ${{ !cancelled() }}
+    needs: [trigger_workflows_after_checks_complete]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

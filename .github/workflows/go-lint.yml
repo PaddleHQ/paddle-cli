@@ -1,0 +1,115 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Ensure go code passes linting rules
+
+on:
+  merge_group:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read # Required to check out the code
+  pull-requests: write # Required to post a comment on the PR
+  checks: write # Required to post a comment on the PR
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  read-config:
+    name: Read build configuration
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    outputs:
+      runsOn: ${{ steps.build_config.outputs.runsOn }}
+      lintTimeout: ${{ steps.build_config.outputs.lintTimeout }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Read build config
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+  lint:
+    name: Ensure code passes linting rules
+    needs:
+      - read-config
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 20
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+          fetch-depth: 0
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+
+      - name: Resolve base ref
+        id: base
+        run: |
+          base_ref="${{ github.event.pull_request.base.ref || github.event.merge_group.base_ref }}"
+          base_ref="${base_ref#refs/heads/}"
+          merge_base=$(git merge-base "origin/${base_ref}" HEAD)
+          echo "sha=$merge_base" >> "$GITHUB_OUTPUT"
+
+      - name: Determine lint scope
+        id: scope
+        uses: ./.github/actions/lint-scope
+        with:
+          base-sha: ${{ steps.base.outputs.sha }}
+
+      - name: golangci-lint
+        if: steps.scope.outputs.skip != 'true'
+        uses: step-security/golangci-lint-action@2697867e9c204558ca23d0decdd0039dc21f2b93 # v9.3.0
+        with:
+          version: v2.11.0
+          args: --timeout=${{ needs.read-config.outputs.lintTimeout || '5m' }} ${{ steps.scope.outputs.new-from-rev }} ${{ steps.scope.outputs.pkgs }}
+          verify: false
+          debug: cache
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always() && needs.lint.result != 'skipped'
+    needs: [lint]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

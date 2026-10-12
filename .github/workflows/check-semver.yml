@@ -1,0 +1,102 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Ensure SemVer Label is added
+
+on:
+  merge_group:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+
+permissions:
+  contents: read
+  issues: read
+  pull-requests: read
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+env:
+  VALID_SEMVER_LABELS: norelease,release:major,release:minor,release:patch
+
+jobs:
+  check_semver:
+    name: Ensure SemVer Label is added
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Read build config
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        if: steps.build_config.outputs['semanticReleases'] != 'false'
+        with:
+          script: |
+            const validLabels = process.env.VALID_SEMVER_LABELS.split(",");
+            const { data: labelResultList } = await github.rest.issues.listLabelsOnIssue({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number
+            });
+
+            const prLabels = labelResultList.map(label => label.name);
+            const semverLabels = prLabels.filter(value => validLabels.includes(value));
+
+            core.info(`Valid labels: ${validLabels.join(" | ")}`);
+            core.info(`PR labels: ${prLabels.join(" | ")}`);
+            core.info(`Semver Labels: ${semverLabels.join(" | ")}`);
+
+            if (semverLabels.length == 0) {
+              core.setFailed(`You must add a SemVer label of one of ${validLabels.join(" | ")} to this PR`);
+            }
+
+            if (semverLabels.length > 1) {
+              core.setFailed("You must only add one SemVer label to this PR");
+            }
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    # always() alone is true for a skipped dependency, so a run where nothing
+    # happened would still boot a runner to export an empty trace.
+    if: always() && needs.check_semver.result != 'skipped'
+    needs: [check_semver]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

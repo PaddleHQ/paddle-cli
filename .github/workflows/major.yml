@@ -1,0 +1,152 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Check for major dependency updates
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+
+jobs:
+  major:
+    name: Check for major dependency updates
+    # Only run on Dependabot PRs to reduce noise: the major-dependency advisory
+    # comment is most useful on dependency-bump PRs, not on every human PR.
+    # Automerge is still triggered for non-Dependabot PRs via the trigger-automerge
+    # step in the other synced workflows (test, validate, check-build, ...).
+    if: github.event.pull_request.user.login == 'dependabot[bot]'
+    runs-on: go-2-core
+    timeout-minutes: 10
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          clear-token: 'false'
+
+      - name: Install `gomajor`
+        # PaddleHQ fork of gomajor: resolves private github.com/PaddleHQ/* modules
+        # (via `go list`) so their major upgrades are surfaced too. Upstream
+        # icholy/gomajor silently skips private modules.
+        run: go install github.com/PaddleHQ-Forks/gomajor@2f09cbe011caa95b28cdb595bc90806278448b8e # v0.16.0
+
+      - name: Run `gomajor`
+        id: gomajor
+        env:
+          GOPRIVATE: github.com/PaddleHQ/*
+        run: |
+          # mockery v2 is ignored while we make a decision on how we upgrade.
+          # see https://paddle.slack.com/archives/CCALA6J23/p1744297603199989
+          go_path=$(go env GOPATH)
+          export PATH=${PATH}:${go_path}/bin
+          raw="$(gomajor list -major -pre)"
+          deps="$(printf '%s\n' "$raw" | grep -v 'github.com/vektra/mockery/v2' || true)"
+          {
+            echo 'major_dependencies<<EOF'
+            printf '%s\n' "$deps" | awk 'NF {print "> "$0}'
+            echo EOF
+          } >> "$GITHUB_OUTPUT"
+          # Flag when PaddleHQ-owned modules are outstanding: previous major
+          # versions of our own modules are not maintained, so the comment step
+          # escalates the styling (danger vs warning) to prioritise them.
+          if printf '%s\n' "$deps" | grep -q '^github\.com/PaddleHQ/'; then
+            echo 'has_paddle_deps=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'has_paddle_deps=false' >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Remove git token from cache
+        shell: bash
+        run: git credential-cache exit
+
+      # PaddleHQ modules outstanding -> danger styling: previous major versions of
+      # our own modules are not maintained, so these should be prioritised. This is
+      # advisory only — it does not block automerge.
+      - name: Comment PR — PaddleHQ major dependencies outstanding (danger)
+        if: steps.gomajor.outputs.major_dependencies != '' && steps.gomajor.outputs.has_paddle_deps == 'true'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: major_dependencies
+          mode: upsert
+          message: |
+            > [!CAUTION]
+            > ## :rotating_light: PaddleHQ major upgrade outstanding
+            >
+            > The upgrades below include **PaddleHQ** modules. We don't maintain previous major versions, so please prioritise these — they won't be picked up automatically.
+            > ```
+            ${{ steps.gomajor.outputs.major_dependencies }}
+            > ```
+
+      # Only third-party modules outstanding -> warning (advisory).
+      - name: Comment PR — third-party major dependencies outstanding (warning)
+        if: steps.gomajor.outputs.major_dependencies != '' && steps.gomajor.outputs.has_paddle_deps != 'true'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: major_dependencies
+          mode: upsert
+          message: |
+            > [!IMPORTANT]
+            > ## :warning: Major dependencies need updating :warning:
+            >
+            > The following major dependencies are outdated:
+            > ```
+            ${{ steps.gomajor.outputs.major_dependencies }}
+            > ```
+
+      # Nothing outstanding -> remove any stale comment.
+      - name: Delete major dependencies comment when none outstanding
+        if: steps.gomajor.outputs.major_dependencies == ''
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: major_dependencies
+          mode: delete
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    # always() alone is true for a skipped dependency, so a run where nothing
+    # happened would still boot a runner to export an empty trace.
+    if: always() && needs.major.result != 'skipped'
+    needs: [major]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}

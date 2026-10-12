@@ -1,0 +1,729 @@
+# DO NOT EDIT: This file should only be modified in the `go-library-template` repo.
+
+name: Run tests and validate coverage
+
+on:
+  merge_group:
+  pull_request:
+
+env:
+  TARGET_COVERAGE_DIFF: 5
+  AWS_REGION: us-east-1
+  AWS_ACCOUNT_ID: "067421297632"
+  WKHTMLTOPDF_PATH: "/bin/wkhtmltopdf"
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event_name }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: write
+  actions: write # required for `workflow-dispatch` to trigger the automerge workflow
+  id-token: write # required for ECR login (pull go-dtr-base container)
+
+jobs:
+  read-config:
+    name: Read build configuration
+    runs-on: generic-2-core
+    timeout-minutes: 10
+    outputs:
+      testRunner: ${{ steps.build_config.outputs.testRunner }}
+      separateRaceTests: ${{ steps.build_config.outputs['separateRaceTests'] }}
+      runsOn: ${{ steps.build_config.outputs.runsOn }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Read build config
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+  test:
+    name: Run tests with coverage
+    if: needs.read-config.outputs.separateRaceTests == 'true'
+    needs:
+      - read-config
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: cover
+
+      - name: Download external dependencies
+        run: |
+          output_dir=$(dirname "${target}")
+
+          yq '.externalDependencies | @tsv' < build-config.yaml | # Read build config
+            tail -n +2 |                                          # Remove header row
+            while IFS=$'\t' read -r source target; do             # Read each line
+              echo "Copying from ${source} to ${target}"          # Log action
+              mkdir -p "${output_dir}"                            # Ensure target directory exists
+              curl -L -o "${target}" "${source}"                  # Copy the file
+            done
+
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
+
+      - name: Setup test databases
+        id: setup-databases
+        uses: ./.github/actions/setup-databases
+
+      - name: Setup Env
+        run: |
+          yq '.env | to_entries | @tsv' < build-config.yaml |
+            tail -n +2 |
+            while IFS=$'\t' read -r source target; do
+                echo "${source}=${target}" >> "$GITHUB_ENV"
+            done
+
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: step-security/amazon-ecr-login@b8045438dc204276b62463a5e3cfedca8cb0dca0 # v2.1.6
+
+      - name: Run tests with coverage
+        timeout-minutes: 20
+        env:
+          ENVIRONMENT: ci
+          CGO_ENABLED: 1
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
+            --
+            -cover
+            -covermode=atomic
+            -coverpkg ./...
+            -buildvcs=true
+            -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
+
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
+
+      - name: Convert test reports to CTRF
+        if: always() && github.event_name == 'pull_request'
+        run: |
+          cat test-report.json | go-ctrf-json-reporter -quiet -output test-ctrf-report.json || true
+
+      - name: Publish Test Report
+        if: always() && github.event_name == 'pull_request'
+        uses: ctrf-io/github-test-reporter@7974087018bf4857cf5a9d78723e152038c3fa31 # v1.3.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          report-path: test-ctrf-report.json
+          pull-request-report: true
+          overwrite-comment: true
+          on-fail-only: true
+          comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
+
+      # on-fail-only stops the reporter posting on green, but it never deletes:
+      # a fail->pass leaves the old failure comment behind. Remove it here so a
+      # passing PR never shows a stale report. Matched by the reporter's hidden
+      # marker (see ctrf-io/github-test-reporter comment-tag handling). Cosmetic
+      # cleanup, so continue-on-error keeps a stray API hiccup from failing CI.
+      - name: Remove stale test report comment on success
+        if: success() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MARKER: '<!-- CTRF PR COMMENT TAG: ${{ github.workflow }}-${{ github.event.pull_request.number }} -->'
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id=$(curl -sf \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/issues/${PR}/comments?per_page=100" \
+            | jq -r --arg m "${MARKER}" 'map(select(.body | contains($m))) | .[0].id // empty')
+          if [ -n "${id}" ]; then
+            curl -sf -X DELETE \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/issues/comments/${id}"
+          fi
+
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
+
+      - name: Get total coverage
+        run: |
+          echo "TOTAL_COVERAGE=$(go tool cover -func cover.filtered.out | tail -n 1 | awk '{print substr($3, 1, length($3)-3)}')" \
+            >> "$GITHUB_ENV"
+
+      - name: Read build config
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: Calculate target coverage
+        run: |
+          echo "TARGET_COVERAGE=$(( \
+                ${{ steps.build_config.outputs['requiredCoverage'] || 100 }} \
+                + \
+                TARGET_COVERAGE_DIFF \
+              ))" >> "$GITHUB_ENV"
+
+      - name: Ensure coverage is good
+        if: github.event_name == 'pull_request'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
+          message: |
+            > [!CAUTION]
+            > ## :cry: Coverage is too low :cry:
+            > Total coverage is `${{ env.TOTAL_COVERAGE }}%` but the required coverage is `${{ steps.build_config.outputs['requiredCoverage'] || 100 }}%`.
+
+              Please add additional tests to increase coverage.
+
+      - name: Fail if coverage is too low
+        if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
+        run: exit 1
+
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
+
+      - name: Comment PR to update build coverage
+        if: github.event_name == 'pull_request'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
+          message: |
+            > [!TIP]
+            > ## :heart_eyes: Coverage has improved  :heart_eyes:
+            > You may want to update the coverage configuration in `./build-config.yaml` to:
+              `requiredCoverage: ${{ env.TOTAL_COVERAGE }}`
+
+              ```diff
+              diff --git a/build-config.yaml b/build-config.yaml
+              --- a/build-config.yaml
+              +++ b/build-config.yaml
+              @@ -1,1 +1,1 @@
+              -requiredCoverage: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+              +requiredCoverage: ${{ env.TOTAL_COVERAGE }}
+              ```
+
+  test-combined:
+    name: Run tests with coverage and race detector
+    if: needs.read-config.outputs.separateRaceTests != 'true'
+    needs:
+      - read-config
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: race
+
+      - name: Download external dependencies
+        run: |
+          output_dir=$(dirname "${target}")
+
+          yq '.externalDependencies | @tsv' < build-config.yaml | # Read build config
+            tail -n +2 |                                          # Remove header row
+            while IFS=$'\t' read -r source target; do             # Read each line
+              echo "Copying from ${source} to ${target}"          # Log action
+              mkdir -p "${output_dir}"                            # Ensure target directory exists
+              curl -L -o "${target}" "${source}"                  # Copy the file
+            done
+
+      - name: Install Go tools
+        uses: ./.github/actions/install-go-tools
+        with:
+          tools: |
+            gotestsum
+            go-ctrf-json-reporter
+
+      - name: Setup test databases
+        id: setup-databases
+        uses: ./.github/actions/setup-databases
+
+      - name: Setup Env
+        run: |
+          yq '.env | to_entries | @tsv' < build-config.yaml |
+            tail -n +2 |
+            while IFS=$'\t' read -r source target; do
+                echo "${source}=${target}" >> "$GITHUB_ENV"
+            done
+
+      - name: Configure AWS credentials for ECR pull
+        if: needs.read-config.outputs.testRunner != ''
+        uses: aws-actions/configure-aws-credentials@e1253824e5c10ff9df46874f81ed3ec929e19cfd # v6.3.0
+        with:
+          audience: sts.amazonaws.com
+          role-session-name: paddle-gha-ecr-${{ github.event.repository.name }}
+          role-to-assume: arn:aws:iam::067421297632:role/paddle-tfecr-gha-ecr-${{ github.event.repository.name }}
+          aws-region: us-east-1
+          role-duration-seconds: 900
+          retry-max-attempts: 3
+
+      - name: Log in to Amazon ECR
+        if: needs.read-config.outputs.testRunner != ''
+        uses: step-security/amazon-ecr-login@b8045438dc204276b62463a5e3cfedca8cb0dca0 # v2.1.6
+
+      - name: Run tests with coverage and race detector
+        timeout-minutes: 20
+        env:
+          ENVIRONMENT: ci
+          CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
+          TEST_IMAGE: ${{ needs.read-config.outputs.testRunner }}
+        run: |
+          set -euo pipefail
+          mkdir -p "${GITHUB_WORKSPACE}/covdata"
+          gotestsum_args=(
+            --format testname
+            --jsonfile test-report.json
+            --rerun-fails
+            --rerun-fails-abort-on-data-race
+            --packages=./...
+            --
+            -v
+            -cover
+            -covermode=atomic
+            -coverpkg ./...
+            -race
+            -buildvcs=true
+            -shuffle=on
+            -args -test.gocoverdir="${GITHUB_WORKSPACE}/covdata"
+          )
+
+          if [ -z "$TEST_IMAGE" ]; then
+            gotestsum "${gotestsum_args[@]}"
+            exit 0
+          fi
+
+          # Run go test inside the configured testRunner image. Host-side
+          # steps (checkout, setup-go, setup-databases, JS-based reporting)
+          # stay on the host so GHA's JS-Actions-in-Alpine-arm64 restriction
+          # doesn't bite. --network host lets the containerised tests reach
+          # databases setup-databases provisioned on the host. --user matches
+          # the host UID so output files (coverage, CTRF) are readable by
+          # subsequent host steps.
+          docker run --rm \
+            --network host \
+            --user "$(id -u):$(id -g)" \
+            -v "$GITHUB_WORKSPACE:$GITHUB_WORKSPACE" -w "$GITHUB_WORKSPACE" \
+            -v "$(go env GOMODCACHE):/tmp/gomodcache" \
+            -v "$(go env GOCACHE):/tmp/gocache" \
+            -e HOME=/tmp \
+            -e GOMODCACHE=/tmp/gomodcache \
+            -e GOCACHE=/tmp/gocache \
+            -e ENVIRONMENT -e CGO_ENABLED -e GORACE \
+            "$TEST_IMAGE" \
+            gotestsum "${gotestsum_args[@]}"
+
+      - name: Merge coverage profile
+        # gotestsum writes binary coverage into covdata/ (-test.gocoverdir),
+        # which accumulates across any --rerun-fails re-invocations. Merge it
+        # into the cover.out the downstream coverage steps read. An empty dir
+        # (a repo with no tests) yields a mode-only profile.
+        run: |
+          set -euo pipefail
+          if [ -n "$(ls -A "${GITHUB_WORKSPACE}/covdata" 2>/dev/null)" ]; then
+            go tool covdata textfmt -i="${GITHUB_WORKSPACE}/covdata" -o cover.out
+          else
+            echo "mode: atomic" > cover.out
+          fi
+
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
+
+      - name: Convert test reports to CTRF
+        if: always()
+        run: |
+          cat test-report.json | go-ctrf-json-reporter -quiet -output test-ctrf-report.json || true
+
+      - name: Publish Test Report
+        if: always()
+        uses: ctrf-io/github-test-reporter@7974087018bf4857cf5a9d78723e152038c3fa31 # v1.3.0
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          report-path: test-ctrf-report.json
+          pull-request-report: true
+          overwrite-comment: true
+          on-fail-only: true
+          comment-tag: '${{ github.workflow }}-${{ github.event.pull_request.number }}'
+
+      # on-fail-only stops the reporter posting on green, but it never deletes:
+      # a fail->pass leaves the old failure comment behind. Remove it here so a
+      # passing PR never shows a stale report. Matched by the reporter's hidden
+      # marker (see ctrf-io/github-test-reporter comment-tag handling). Cosmetic
+      # cleanup, so continue-on-error keeps a stray API hiccup from failing CI.
+      - name: Remove stale test report comment on success
+        if: success() && github.event_name == 'pull_request'
+        continue-on-error: true
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MARKER: '<!-- CTRF PR COMMENT TAG: ${{ github.workflow }}-${{ github.event.pull_request.number }} -->'
+          PR: ${{ github.event.pull_request.number }}
+          REPO: ${{ github.repository }}
+        run: |
+          set -euo pipefail
+          id=$(curl -sf \
+            -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+            -H "Accept: application/vnd.github+json" \
+            "https://api.github.com/repos/${REPO}/issues/${PR}/comments?per_page=100" \
+            | jq -r --arg m "${MARKER}" 'map(select(.body | contains($m))) | .[0].id // empty')
+          if [ -n "${id}" ]; then
+            curl -sf -X DELETE \
+              -H "Authorization: Bearer ${GITHUB_TOKEN}" \
+              -H "Accept: application/vnd.github+json" \
+              "https://api.github.com/repos/${REPO}/issues/comments/${id}"
+          fi
+
+      - name: Resolve generated paths
+        id: generated_paths
+        uses: ./.github/actions/resolve-generated-paths
+
+      - name: Remove generated files from coverage
+        env:
+          EXCLUDE_REGEX: ${{ steps.generated_paths.outputs.grep-regex }}
+        run: grep -vE "${EXCLUDE_REGEX}" cover.out > cover.filtered.out
+
+      - name: Get total coverage
+        run: |
+          echo "TOTAL_COVERAGE=$(go tool cover -func cover.filtered.out | tail -n 1 | awk '{print substr($3, 1, length($3)-3)}')" \
+            >> "$GITHUB_ENV"
+
+      - name: Read build config
+        id: build_config
+        uses: step-security/action-read-yaml@705ee0c6475c5a26a356e79ee380eb3527b3772d # v1.0.1
+        with:
+          config: ${{ github.workspace }}/build-config.yaml
+
+      - name: Calculate target coverage
+        run: |
+          echo "TARGET_COVERAGE=$(( \
+                ${{ steps.build_config.outputs['requiredCoverage'] || 100 }} \
+                + \
+                TARGET_COVERAGE_DIFF \
+              ))" >> "$GITHUB_ENV"
+
+      - name: Ensure coverage is good
+        if: github.event_name == 'pull_request'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100) && 'upsert' || 'delete' }}
+          message: |
+            > [!CAUTION]
+            > ## :cry: Coverage is too low :cry:
+            > Total coverage is `${{ env.TOTAL_COVERAGE }}%` but the required coverage is `${{ steps.build_config.outputs['requiredCoverage'] || 100 }}%`.
+
+              Please add additional tests to increase coverage.
+
+      - name: Fail if coverage is too low
+        if: fromJSON(env.TOTAL_COVERAGE) < (steps.build_config.outputs['requiredCoverage'] || 100)
+        run: exit 1
+
+      # Emitted from the merge-queue run only: that build is the merge commit
+      # about to land on main, so its coverage is main's coverage. One event
+      # per merge to the ci-coverage dataset; graph MAX(coverage.total) by
+      # service.name over time.
+      - name: Push coverage to Honeycomb
+        if: github.event_name == 'merge_group'
+        continue-on-error: true
+        env:
+          HONEYCOMB_TEAM: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          REQUIRED_COVERAGE: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+          SERVICE_NAME: ${{ github.event.repository.name }}
+          COMMIT_SHA: ${{ github.event.merge_group.head_sha }}
+        run: |
+          curl -sf https://api.honeycomb.io/1/events/ci-coverage \
+            -H "X-Honeycomb-Team: $HONEYCOMB_TEAM" \
+            -H "Content-Type: application/json" \
+            -d "$(jq -nc \
+              --argjson total "$TOTAL_COVERAGE" \
+              --argjson required "$REQUIRED_COVERAGE" \
+              --arg service "$SERVICE_NAME" \
+              --arg commit "$COMMIT_SHA" \
+              '{"coverage.total": $total, "coverage.required": $required, "service.name": $service, "branch": "main", "commit": $commit}')"
+
+      - name: Comment PR to update build coverage
+        if: github.event_name == 'pull_request'
+        uses: step-security/actions-comment-pull-request@60cd38988a354b2d22b47612fb02a20e822d6048 # v3.0.2
+        with:
+          comment-tag: build_coverage
+          mode: ${{ fromJSON(env.TOTAL_COVERAGE) > fromJSON(env.TARGET_COVERAGE) && 'upsert' || 'delete' }}
+          message: |
+            > [!TIP]
+            > ## :heart_eyes: Coverage has improved  :heart_eyes:
+            > You may want to update the coverage configuration in `./build-config.yaml` to:
+              `requiredCoverage: ${{ env.TOTAL_COVERAGE }}`
+
+              ```diff
+              diff --git a/build-config.yaml b/build-config.yaml
+              --- a/build-config.yaml
+              +++ b/build-config.yaml
+              @@ -1,1 +1,1 @@
+              -requiredCoverage: ${{ steps.build_config.outputs['requiredCoverage'] || 100 }}
+              +requiredCoverage: ${{ env.TOTAL_COVERAGE }}
+              ```
+
+  race:
+    name: Run tests with race detector
+    if: needs.read-config.outputs.separateRaceTests == 'true'
+    needs:
+      - read-config
+    runs-on: ${{ needs.read-config.outputs.runsOn || 'go-4-core' }}
+    timeout-minutes: 30
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: ./.github/actions/setup-go
+        with:
+          owner: ${{ github.repository_owner }}
+          private: ${{ github.event.repository.private }}
+          private-key: ${{ secrets.PRIVATE_GO_CI_PRIVATE_KEY }}
+          cache-suffix: race
+
+      - name: Download external dependencies
+        run: |
+          output_dir=$(dirname "${target}")
+
+          yq '.externalDependencies | @tsv' < build-config.yaml | # Read build config
+            tail -n +2 |                                          # Remove header row
+            while IFS=$'\t' read -r source target; do             # Read each line
+              echo "Copying from ${source} to ${target}"          # Log action
+              mkdir -p "${output_dir}"                            # Ensure target directory exists
+              curl -L -o "${target}" "${source}"                  # Copy the file
+            done
+
+      - name: Setup test databases
+        id: setup-databases
+        uses: ./.github/actions/setup-databases
+
+      - name: Setup Env
+        run: |
+          yq '.env | to_entries | @tsv' < build-config.yaml |
+            tail -n +2 |
+            while IFS=$'\t' read -r source target; do
+                echo "${source}=${target}" >> "$GITHUB_ENV"
+            done
+
+      - name: Run tests with race detector
+        timeout-minutes: 20
+        env:
+          ENVIRONMENT: ci
+          CGO_ENABLED: 1
+          GORACE: atexit_sleep_ms=50
+        run: |
+          module=$(go list -m)
+          mapfile -t test_packages < <(go list ./... | grep -v "^${module}$")
+
+          go test \
+            -race \
+            -buildvcs=true \
+            -shuffle=on \
+            "${test_packages[@]}"
+
+      - name: Snapshot Postgres template cache
+        if: always()
+        uses: ./.github/actions/snapshot-postgres-templates
+        with:
+          testament-imported: ${{ steps.setup-databases.outputs.testament-imported }}
+          postgres-template-cache-hit: ${{ steps.setup-databases.outputs.postgres-template-cache-hit }}
+          postgres-major-version: ${{ steps.setup-databases.outputs.postgres-major-version }}
+
+  validate_tests:
+    name: Run tests and validate coverage
+    needs:
+      - read-config
+      - test-combined
+      - test
+      - race
+    # Always run so the required status check resolves to the actual outcome
+    # of whichever mutex path ran. A SKIPPED required check is treated as
+    # passing by branch protections, which previously let failing test runs
+    # merge when the named-required job happened to be the skipped one.
+    if: always() && !cancelled()
+    runs-on: generic-2-core
+    timeout-minutes: 10
+    steps:
+      - name: Validate test results
+        env:
+          TEST_COMBINED: ${{ needs.test-combined.result }}
+          TEST: ${{ needs.test.result }}
+          RACE: ${{ needs.race.result }}
+        run: |
+          if [[ "$TEST_COMBINED" == "success" ]]; then
+            exit 0
+          fi
+          if [[ "$TEST" == "success" && "$RACE" == "success" ]]; then
+            exit 0
+          fi
+          echo "Tests did not succeed: test-combined=$TEST_COMBINED test=$TEST race=$RACE"
+          exit 1
+
+      - name: Checkout code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha }}
+          persist-credentials: false
+
+      - name: Automerge
+        uses: ./.github/actions/trigger-automerge
+        with:
+          event: ${{ toJSON(github.event) }}
+          hasAutoApproverPrivateKey: ${{ secrets.AUTO_APPROVER_PRIVATE_KEY != '' }}
+
+  otel_cicd_export:
+    name: OpenTelemetry Export Trace
+    if: always()
+    needs: [read-config, test, test-combined, race, validate_tests]
+    runs-on: generic-2-core
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: read
+    steps:
+      - name: Checkout otel-export action
+        if: always()
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: .github/actions/otel-export
+          sparse-checkout-cone-mode: false
+          persist-credentials: false
+
+      - name: Export workflow trace
+        if: always()
+        uses: ./.github/actions/otel-export
+        continue-on-error: true
+        with:
+          honeycomb-team: ${{ secrets.HONEYCOMB_GHA_SECRET }}
+          honeycomb-dataset: ${{ vars.HONEYCOMB_GHA_DATASET }}
+          github-token: ${{ secrets.GITHUB_TOKEN }}
