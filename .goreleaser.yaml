@@ -1,0 +1,72 @@
+version: 2
+
+project_name: paddle
+
+builds:
+  - id: paddle
+    main: ./cmd/paddle
+    binary: paddle
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - darwin
+      - linux
+      - windows
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/PaddleHQ/paddle-cli/internal/build.Version={{ .Tag }}
+      - -X github.com/PaddleHQ/paddle-cli/internal/build.Commit={{ .ShortCommit }}
+
+archives:
+  - formats:
+      - tar.gz
+    format_overrides:
+      - goos: windows
+        formats:
+          - zip
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+
+checksum:
+  name_template: checksums.txt
+
+sboms:
+  - artifacts: archive
+
+changelog:
+  use: github
+  sort: asc
+
+release:
+  github:
+    owner: PaddleHQ
+    name: paddle-cli
+  prerelease: auto
+
+homebrew_casks:
+  - name: paddle
+    binaries:
+      - paddle
+    homepage: https://github.com/PaddleHQ/paddle-cli
+    description: Command-line interface for the Paddle API
+    directory: Casks
+    skip_upload: auto
+    repository:
+      owner: PaddleHQ
+      name: homebrew-tap
+      branch: "paddle-{{ .Version }}"
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+      pull_request:
+        enabled: true
+        base:
+          owner: PaddleHQ
+          name: homebrew-tap
+          branch: main
+    hooks:
+      post:
+        install: |
+          if OS.mac?
+            system_command "/usr/bin/xattr", args: ["-dr", "com.apple.quarantine", "#{staged_path}/paddle"]
+          end

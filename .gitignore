@@ -1,0 +1,17 @@
+# Binaries
+/bin/
+/paddle
+*.exe
+
+# OS
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# Superpowers
+.superpowers/
+
+# GoReleaser
+/dist/

@@ -1,0 +1,197 @@
+## This file should only be updated in the coding-standards (https://github.com/PaddleHQ/coding-standards/) repo.
+## Changes will automatically generate a PR into all the go services and libraries
+
+## This file should only be updated in the coding-standards (https://github.com/PaddleHQ/coding-standards/) repo.
+## Changes will automatically generate a PR into all the go services and libraries
+version: "2"
+run:
+  tests: true
+issues:
+  max-issues-per-linter: 0
+  max-same-issues: 0
+  # Report every issue in a changed file, not only issues on changed lines, so whole-function
+  # linters (gocognit/gocyclo/cyclop/funlen) that anchor at the func declaration aren't missed
+  # when a body-only edit raises complexity. No-op unless --new-from-rev/--new-from-patch is set.
+  whole-files: true
+formatters:
+  enable:
+    - gci
+    - gofmt
+    - gofumpt
+  settings:
+    gci:
+      sections:
+        - standard
+        - localmodule
+        - prefix(github.com/PaddleHQ)
+        - default
+      custom-order: true
+    gofmt:
+      simplify: true
+      rewrite-rules:
+        - pattern: interface{}
+          replacement: any
+        - pattern: a[b:len(a)]
+          replacement: a[b:]
+  exclusions:
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+linters:
+  default: none
+  enable:
+    - bodyclose
+    - containedctx
+    - copyloopvar
+    - cyclop
+    - dogsled
+    - durationcheck
+    - err113
+    - errcheck
+    - errname
+    - exhaustive
+    - forbidigo
+    - forcetypeassert
+    - funlen
+    - gocognit
+    - goconst
+    - gocritic
+    - gocyclo
+    - godot
+    - gosec
+    - govet
+    - ineffassign
+    - lll
+    - makezero
+    - misspell
+    - nestif
+    - nilerr
+    - noctx
+    - prealloc
+    - predeclared
+    - revive
+    - rowserrcheck
+    - sloglint
+    - spancheck
+    - sqlclosecheck
+    - staticcheck
+    - testifylint
+    - testpackage
+    - unconvert
+    - unparam
+    - unused
+    - usetesting
+    - wastedassign
+    - whitespace
+    - modernize
+    - nilnil
+    - wrapcheck
+  settings:
+    exhaustive:
+      default-signifies-exhaustive: true
+    gocritic:
+      disabled-checks:
+        - hugeParam
+        - paramTypeCombine
+      enabled-tags:
+        - diagnostic
+        - opinionated
+        - performance
+        - style
+    godot:
+      exclude:
+        # go-relish uses comments to auto-generate code, these lines should not end with a `.`
+        - '@(Given|When|Then|And|But) (.*)'
+    gosec:
+      excludes:
+        - G115
+        ## Its cancel-func check misses calls made from a closure, a spawned
+        ## goroutine, or returned to a deferring caller: 9 of 9 verified false
+        ## positives across the estate.
+        - G118
+    lll:
+      line-length: 140
+    misspell:
+      locale: US
+      ignore-rules:
+        - localised
+        - catalogue
+        - authorised
+    revive:
+      enable-default-rules: true
+      rules:
+        ## Each spelling of a telemetry.Annotate key is its own Honeycomb column, so literal keys must use the
+        ## registry's dotted form. Constant keys are checked by the go-semconv naming tests instead.
+        - name: string-format
+          arguments:
+            - - >-
+                telemetry.String[0], telemetry.Bool[0], telemetry.Int[0], telemetry.Int64[0], telemetry.Float64[0], telemetry.StringSlice[0], telemetry.BoolSlice[0], telemetry.IntSlice[0], telemetry.Int64Slice[0], telemetry.Float64Slice[0]
+              - /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)+$/
+              - telemetry keys must be dotted lowercase, e.g. "seller.id"; prefer a go-semconv constant
+            - - telemetry.TimeAttr[1]
+              - /^[a-z][a-z0-9_]*(\.[a-z][a-z0-9_]*)*$/
+              - TimeAttr prefixes must be dotted lowercase or snake_case, e.g. "scope_check"
+    sloglint:
+      context: all
+      static-msg: true
+    staticcheck:
+      checks:
+        - all
+        - -QF1008
+    spancheck:
+      checks:
+        - end
+        - record-error
+        - set-status
+    testifylint:
+      disable:
+        - require-error
+    wrapcheck:
+      ignore-package-globs:
+        - github.com/PaddleHQ/*
+  exclusions:
+    rules:
+      - linters:
+          - bodyclose
+          - containedctx
+          - copyloopvar
+          - cyclop
+          - dogsled
+          - err113
+          - exhaustive
+          - forcetypeassert
+          - funlen
+          - gocognit
+          - goconst
+          - gocyclo
+          - gosec
+          - lll
+          - nestif
+        path: _test\.go
+      - linters:
+          - revive
+        path: _test\.go
+        text: "string-format: (telemetry keys|TimeAttr prefixes)"
+      - linters:
+          - nilnil
+          - wrapcheck
+        path: _test\.go
+    paths:
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
+      - third_party$
+      - builtin$
+      - examples$
+      - /mocks/
+      - \.pb\.go$
