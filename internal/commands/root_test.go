@@ -572,19 +572,18 @@ func TestRootSetup_SendsDetectedAgentAsClientApp(t *testing.T) {
 
 func TestRootSetup_CredentialPrecedence(t *testing.T) {
 	cases := []struct {
-		name        string
-		flag        string
-		envVar      string
-		storedKey   string
-		storedTok   string
-		wantAuth    string
-		wantHasCred bool
+		name      string
+		flag      string
+		envVar    string
+		storedKey string
+		storedTok string
+		wantAuth  string
 	}{
-		{name: "flag wins over everything", flag: "flag_key", envVar: "env_key", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer flag_key", wantHasCred: true},
-		{name: "env var wins over stored", envVar: "env_key", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer env_key", wantHasCred: true},
-		{name: "stored api key wins over stored oauth token", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer stored_key", wantHasCred: true},
-		{name: "falls back to stored oauth token", storedTok: "stored_tok", wantAuth: "Bearer stored_tok", wantHasCred: true},
-		{name: "nothing set", wantAuth: "", wantHasCred: false},
+		{name: "flag wins over everything", flag: "flag_key", envVar: "env_key", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer flag_key"},
+		{name: "env var wins over stored", envVar: "env_key", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer env_key"},
+		{name: "stored api key wins over stored oauth token", storedKey: "stored_key", storedTok: "stored_tok", wantAuth: "Bearer stored_key"},
+		{name: "falls back to stored oauth token", storedTok: "stored_tok", wantAuth: "Bearer stored_tok"},
+		{name: "nothing set", wantAuth: ""},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -611,12 +610,10 @@ func TestRootSetup_CredentialPrecedence(t *testing.T) {
 				t.Setenv("PADDLE_API_KEY", tc.envVar)
 			}
 
-			var gotHasCred bool
 			root := commands.NewRoot(commands.RootConfig{ConfigPath: cfgPath})
 			root.Cmd.AddCommand(&cobra.Command{
 				Use: "noop",
 				RunE: func(_ *cobra.Command, _ []string) error {
-					gotHasCred = root.HasCredential
 					_, err := root.Client().Do("GET", "/ping", nil, nil)
 					return err
 				},
@@ -634,9 +631,6 @@ func TestRootSetup_CredentialPrecedence(t *testing.T) {
 			}
 			if gotAuth != tc.wantAuth {
 				t.Errorf("Authorization header = %q, want %q", gotAuth, tc.wantAuth)
-			}
-			if gotHasCred != tc.wantHasCred {
-				t.Errorf("HasCredential = %v, want %v", gotHasCred, tc.wantHasCred)
 			}
 		})
 	}

@@ -42,7 +42,6 @@ type Root struct {
 	Environment      string // resolved current environment, populated in setup
 	BannerSuppressed bool   // resolved suppression from flag/env/config
 	NonInteractive   bool   // --non-interactive: disables prompts without changing output format
-	HasCredential    bool   // true once setup() resolves a non-empty bearer credential (API key or OAuth token)
 }
 
 // NewRoot builds the root command with its persistent flags and command groups.
@@ -132,7 +131,6 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
-	r.HasCredential = accessToken != ""
 
 	r.ClientPtr.Configure(client.Config{
 		BaseURL:     apiURL,
