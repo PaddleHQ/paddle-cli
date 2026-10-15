@@ -1,0 +1,48 @@
+name: Label Checker
+
+on:
+  pull_request:
+    types:
+      - opened
+      - synchronize
+      - reopened
+      - labeled
+      - unlabeled
+  merge_group:
+
+permissions:
+  pull-requests: read
+
+env:
+  VALID_SEMVER_LABELS: norelease,release:major,release:minor,release:patch
+
+jobs:
+  check_labels:
+    name: Check labels
+    # Skipped in the merge queue, which satisfies the required check: the
+    # labels were checked on the PR.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+
+      - uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          script: |
+            const validLabels = process.env.VALID_SEMVER_LABELS.split(",");
+            const prLabels = context.payload.pull_request.labels.map(label => label.name);
+            const semverLabels = prLabels.filter(value => validLabels.includes(value));
+
+            core.info(`Valid labels: ${validLabels.join(" | ")}`);
+            core.info(`PR labels: ${prLabels.join(" | ")}`);
+            core.info(`Semver labels: ${semverLabels.join(" | ")}`);
+
+            if (semverLabels.length === 0) {
+              core.setFailed(`You must add a SemVer label of one of ${validLabels.join(" | ")} to this PR`);
+            } else if (semverLabels.length > 1) {
+              core.setFailed("You must only add one SemVer label to this PR");
+            }

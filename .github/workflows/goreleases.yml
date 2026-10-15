@@ -1,0 +1,129 @@
+name: Release
+
+# release-on-push pushes its tags with GITHUB_TOKEN, which can't trigger workflows,
+# so this runs on every push to main and builds only when that commit got a tag.
+on:
+  push:
+    branches:
+      - public_release
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    name: Check the GoReleaser config
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: goreleaser check
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: check
+
+  await_release:
+    name: Wait for the release tag
+    needs: check
+    if: github.event_name == 'push' && github.ref == 'refs/heads/public_release'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      checks: read
+    outputs:
+      tag: ${{ steps.tag.outputs.tag }}
+    steps:
+      - name: Wait for release-on-push
+        uses: wechuli/allcheckspassed@204ff63e89eabdc8086f0c50b91f675bcf37c8f6 # v2.4.0
+        with:
+          delay: "0"
+          poll: true
+          verbose: true
+          commit_sha: ${{ github.sha }}
+          checks_include: "Create release on push to main branch"
+
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      # --points-at, not --contains: --contains would also match tags on
+      # later commits, and release an untagged merge.
+      - name: Find the tag for this commit
+        id: tag
+        run: |
+          tag="$(git tag --points-at "${GITHUB_SHA}" --list 'v*' | head -n 1)"
+          echo "tag=${tag}" >> "${GITHUB_OUTPUT}"
+          if [ -n "${tag}" ]; then
+            echo "Releasing ${tag}"
+          else
+            echo "No release tag on this commit; nothing to release."
+          fi
+
+  goreleaser:
+    name: Build and publish the release
+    needs: await_release
+    if: needs.await_release.outputs.tag != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: write # upload release assets
+      id-token: write # sign the provenance attestation
+      attestations: write
+    steps:
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          ref: ${{ needs.await_release.outputs.tag }}
+          fetch-depth: 0
+          fetch-tags: true
+          persist-credentials: false
+
+      - name: Set up Go
+        uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+
+      - name: Install syft
+        uses: step-security/action-install-gh-release@fcc32674e8d9158ed77bb8ec6d54b7d49ed259b9 # v3.0.0
+        with:
+          repo: anchore/syft
+          rename-to: syft
+          tag: v1.54.1
+          cache: true
+
+      - name: Create a token for the Homebrew tap
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        id: tap-token
+        with:
+          client-id: ${{ secrets.HOMEBREW_TAP_APP_CLIENT_ID }}
+          private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
+          owner: PaddleHQ-Playground
+          repositories: homebrew-cli-tap-test
+          permission-contents: write
+          permission-pull-requests: write
+
+      - name: Run GoReleaser
+        uses: goreleaser/goreleaser-action@f06c13b6b1a9625abc9e6e439d9c05a8f2190e94 # v7.2.3
+        with:
+          distribution: goreleaser
+          version: v2.18.3
+          args: release --clean
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          HOMEBREW_TAP_TOKEN: ${{ steps.tap-token.outputs.token }}
+
+      - name: Attest build provenance
+        uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
+        with:
+          subject-checksums: dist/checksums.txt

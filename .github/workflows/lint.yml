@@ -1,0 +1,52 @@
+name: Linting
+
+on:
+  pull_request:
+  merge_group:
+
+permissions:
+  contents: read
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  golangci:
+    name: lint
+    # In the merge queue the job is skipped, which satisfies the required
+    # check: the PR was already linted, and reviewdog needs a PR diff.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+
+      - name: Check out code
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # filter_mode: file reports every issue in a changed file, so lint debt is
+      # paid down file by file as the code is touched.
+      - name: golangci-lint
+        uses: reviewdog/action-golangci-lint@284129a3ac23bc5d8ac1522e0b6511df74a8836d # v2.10.2
+        with:
+          go_version_file: go.mod
+          golangci_lint_version: v2.14.0
+          reporter: github-pr-check
+          filter_mode: file
+          fail_level: error
+
+      - name: Install editorconfig-checker
+        uses: editorconfig-checker/action-editorconfig-checker@51f63319f592f97930c73d9c46184d20bd206393 # v3.0.0
+
+      - name: eclint
+        run: editorconfig-checker
+
+      - name: actionlint
+        run: go run github.com/rhysd/actionlint/cmd/actionlint@v1.7.12

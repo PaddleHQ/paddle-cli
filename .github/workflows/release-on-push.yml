@@ -1,0 +1,29 @@
+name: Release on Push
+
+on:
+  push:
+    branches:
+      - public_release
+
+permissions:
+  contents: write
+  pull-requests: read
+
+jobs:
+  release_on_push:
+    # goreleases.yml waits for a check with this name before releasing.
+    name: Create release on push to main branch
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+    steps:
+      - name: Harden the runner (Audit all outbound calls)
+        uses: step-security/harden-runner@351661ca32ac09a36dc5ee2d536e3128f2a3c8ed # v2.22.0
+        with:
+          egress-policy: audit
+
+      - uses: step-security/release-on-push-action@b9dee0685e99e905fe90cba8ba9ed92c7f3806b4 # v0.28.6
+        with:
+          bump_version_scheme: norelease
+          use_github_release_notes: true
