@@ -12,13 +12,29 @@ import (
 func useTestEnvironments(t *testing.T) {
 	t.Cleanup(SetEnvironments(map[string]Environment{
 		"test_env": {
-			BaseURL:    "https://api.example.test",
-			AuthDomain: "auth.example.test",
-			ClientID:   "client_test",
-			Scopes:     []string{"openid", "offline_access"},
+			BaseURL:      "https://api.example.test",
+			AuthDomain:   "auth.example.test",
+			ClientID:     "client_test",
+			Scopes:       []string{"openid", "offline_access"},
+			APIKeyPrefix: "test_live_apikey_",
 		},
-		"test_env_apikey_only": {BaseURL: "https://apikey-only.example.test"},
+		"test_env_apikey_only": {BaseURL: "https://apikey-only.example.test", APIKeyPrefix: "test_sdbx_apikey_"},
 	}, "test_env"))
+}
+
+func TestAPIKeyEnvironment(t *testing.T) {
+	useTestEnvironments(t)
+
+	for key, want := range map[string]string{
+		"test_live_apikey_abc": "test_env",
+		"test_sdbx_apikey_abc": "test_env_apikey_only",
+		"some_oauth_token":     "",
+		"":                     "",
+	} {
+		if got := APIKeyEnvironment(key); got != want {
+			t.Errorf("APIKeyEnvironment(%q) = %q, want %q", key, got, want)
+		}
+	}
 }
 
 func TestEnvironmentURL(t *testing.T) {

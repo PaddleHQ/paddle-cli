@@ -205,11 +205,32 @@ func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Confi
 	if err != nil {
 		return "", err
 	}
-	if accessToken == "" && callsAPI(cmd) {
+	if !callsAPI(cmd) {
+		return accessToken, nil
+	}
+	env := resolved.CurrentEnvironment
+	if accessToken == "" {
 		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
-			client.ErrNotAuthenticated, resolved.CurrentEnvironment)
+			client.ErrNotAuthenticated, env)
+	}
+	// PADDLE_API_URL points away from env's host, so env's key format doesn't apply.
+	if os.Getenv("PADDLE_API_URL") == "" {
+		if err := checkKeyEnvironment(accessToken, env); err != nil {
+			return "", err
+		}
 	}
 	return accessToken, nil
+}
+
+// checkKeyEnvironment returns an ErrCredentialMismatch error when key is an
+// API key issued for an environment other than env.
+func checkKeyEnvironment(key, env string) error {
+	keyEnv := config.APIKeyEnvironment(key)
+	if keyEnv == "" || keyEnv == env {
+		return nil
+	}
+	return fmt.Errorf("%w: it's a %s key, but the environment is %q; pass --environment %s",
+		client.ErrCredentialMismatch, keyEnv, env, keyEnv)
 }
 
 // resolveAccessToken returns the bearer credential: --api-key, then

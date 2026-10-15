@@ -45,11 +45,17 @@ func NewLoginCmd(root *Root) *cobra.Command {
 			if err != nil {
 				return err
 			}
-			if override := os.Getenv("PADDLE_API_URL"); override != "" {
+			override := os.Getenv("PADDLE_API_URL")
+			if override != "" {
 				baseURL = override
 			}
 
 			if apiKey != "" {
+				if override == "" {
+					if err := checkKeyEnvironment(apiKey, env); err != nil {
+						return err
+					}
+				}
 				return loginWithAPIKey(cmd, root, cfg, cfgPath, env, baseURL, apiKey)
 			}
 			return loginWithOAuth(cmd, root, cfg, cfgPath, env, agent)
