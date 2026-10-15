@@ -76,6 +76,10 @@ func ParseAPIError(resp *Response) *APIError {
 	return apiErr
 }
 
+// ErrNotAuthenticated marks a command that needs a credential run without one.
+// It exits with ExitAuthFailure.
+var ErrNotAuthenticated = errors.New("not logged in")
+
 // Exit codes per the safety spec. Codes are HTTP-derived where possible so
 // agents can branch on failure class without parsing error prose.
 const (
@@ -141,6 +145,10 @@ func ExitCodeFor(err error, usageSentinel error) (int, *APIError) {
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		code := apiErr.ExitCode()
 		return code, apiErr
+	}
+
+	if errors.Is(err, ErrNotAuthenticated) {
+		return ExitAuthFailure, nil
 	}
 
 	if isTimeoutError(err) {
