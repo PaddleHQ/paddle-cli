@@ -2,7 +2,6 @@ package commands
 
 import (
 	"encoding/json"
-	"errors"
 	"fmt"
 
 	"github.com/PaddleHQ/paddle-cli/internal/client"
@@ -32,21 +31,16 @@ type whoamiTableRow struct {
 	Permissions string `json:"permissions,omitempty"`
 }
 
-var errNotAuthenticated = errors.New("not authenticated for environment")
-
 // NewWhoamiCmd builds `paddle whoami`, which shows the identity behind the active credential.
 func NewWhoamiCmd(root *Root) *cobra.Command {
 	var full bool
 	cmd := &cobra.Command{
-		Use:     "whoami",
-		Short:   "Show who you're authenticated as in the active environment",
-		GroupID: GroupIDSession,
-		Args:    cobra.NoArgs,
+		Use:         "whoami",
+		Short:       "Show who you're authenticated as in the active environment",
+		GroupID:     GroupIDSession,
+		Annotations: callsAPIAnnotations(),
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, _ []string) error {
-			if !root.HasCredential {
-				return fmt.Errorf("%w %q; run `paddle login` first", errNotAuthenticated, root.Environment)
-			}
-
 			resp, err := root.Client().Do("GET", "/", nil, nil)
 			if err != nil {
 				return err

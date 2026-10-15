@@ -128,7 +128,7 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 		apiURL, _ = config.EnvironmentURL(resolved.CurrentEnvironment)
 	}
 
-	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
+	accessToken, err := r.resolveCredential(cmd, cfg, resolved, cfgPath)
 	if err != nil {
 		return err
 	}
@@ -198,6 +198,20 @@ func resolveOutputOptions(cmd *cobra.Command, resolved *config.Config) (output.O
 	return opts, nil
 }
 
+// resolveCredential returns the bearer credential, refusing up front a command
+// that calls the API without one rather than letting the API reject it.
+func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) (string, error) {
+	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
+	if err != nil {
+		return "", err
+	}
+	if accessToken == "" && callsAPI(cmd) {
+		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
+			client.ErrNotAuthenticated, resolved.CurrentEnvironment)
+	}
+	return accessToken, nil
+}
+
 // resolveAccessToken returns the bearer credential: --api-key, then
 // PADDLE_API_KEY, then the stored credential (refreshing an expiring OAuth token).
 func (r *Root) resolveAccessToken(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) (string, error) {
@@ -252,6 +266,32 @@ func (r *Root) Client() *client.Client {
 // OutputOpts returns a copy of the output options resolved during setup.
 func (r *Root) OutputOpts() output.Options {
 	return *r.OutputPtr
+}
+
+// annotationCallsAPI marks a hand-crafted command that calls the Paddle API,
+// so it needs a credential. Resource commands are covered by their group.
+const annotationCallsAPI = "paddle_calls_api"
+
+func callsAPIAnnotations() map[string]string {
+	return map[string]string{annotationCallsAPI: "true"}
+}
+
+// callsAPI reports whether cmd sends a request to the Paddle API: a resource
+// command (unless it only prints its --schema) or one marked annotationCallsAPI.
+// Group commands only print help or a usage error, so they never do.
+func callsAPI(cmd *cobra.Command) bool {
+	if cmd.HasSubCommands() {
+		return false
+	}
+	if schema, _ := cmd.Flags().GetBool("schema"); schema {
+		return false
+	}
+	top := cmd
+	for top.HasParent() && top.Parent().HasParent() {
+		top = top.Parent()
+	}
+	_, marked := cmd.Annotations[annotationCallsAPI]
+	return marked || (top != cmd.Root() && top.GroupID == GroupIDResources)
 }
 
 // isAgentEnvEnabled reports whether the process is running inside a known
