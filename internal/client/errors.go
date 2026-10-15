@@ -80,6 +80,10 @@ func ParseAPIError(resp *Response) *APIError {
 // It exits with ExitAuthFailure.
 var ErrNotAuthenticated = errors.New("not logged in")
 
+// ErrCredentialMismatch marks an API key issued for a different environment
+// than the one targeted. It exits with ExitAuthFailure.
+var ErrCredentialMismatch = errors.New("API key is for a different environment")
+
 // Exit codes per the safety spec. Codes are HTTP-derived where possible so
 // agents can branch on failure class without parsing error prose.
 const (
@@ -147,7 +151,7 @@ func ExitCodeFor(err error, usageSentinel error) (int, *APIError) {
 		return code, apiErr
 	}
 
-	if errors.Is(err, ErrNotAuthenticated) {
+	if errors.Is(err, ErrNotAuthenticated) || errors.Is(err, ErrCredentialMismatch) {
 		return ExitAuthFailure, nil
 	}
 

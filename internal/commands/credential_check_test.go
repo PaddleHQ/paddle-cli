@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -17,11 +18,16 @@ import (
 )
 
 // newRootWithResource builds a root with a "products" resource command whose
-// "list" and "create" leaves record whether they ran. No credentials are stored.
-func newRootWithResource(t *testing.T) (root *commands.Root, ran *bool) {
+// "list" and "create" leaves record whether they ran. storedKey, if set, is
+// stored as the login for the current environment.
+func newRootWithResource(t *testing.T, storedKey string) (root *commands.Root, ran *bool) {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
-	if err := config.Save(&config.Config{CurrentEnvironment: configtest.TestEnvAPIKeyOnly}, cfgPath); err != nil {
+	cfg := &config.Config{CurrentEnvironment: configtest.TestEnvAPIKeyOnly}
+	if storedKey != "" {
+		cfg.Environments = map[string]config.EnvironmentConfig{configtest.TestEnvAPIKeyOnly: {APIKey: storedKey}}
+	}
+	if err := config.Save(cfg, cfgPath); err != nil {
 		t.Fatal(err)
 	}
 
@@ -48,7 +54,7 @@ func TestCredentialCheck_NotLoggedIn(t *testing.T) {
 		"api command":      {"api", "/products"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			root, ran := newRootWithResource(t)
+			root, ran := newRootWithResource(t, "")
 			root.Cmd.SetArgs(args)
 
 			err := root.Cmd.Execute()
@@ -77,7 +83,7 @@ func TestCredentialCheck_RunsWithoutCheck(t *testing.T) {
 		"no-API command": {"environment"},
 	} {
 		t.Run(name, func(t *testing.T) {
-			root, ran := newRootWithResource(t)
+			root, ran := newRootWithResource(t, "")
 			root.Cmd.SetArgs(args)
 
 			if err := root.Cmd.Execute(); err != nil {
@@ -92,7 +98,7 @@ func TestCredentialCheck_RunsWithoutCheck(t *testing.T) {
 
 func TestCredentialCheck_GroupCommandWithoutLogin(t *testing.T) {
 	t.Run("lists subcommands", func(t *testing.T) {
-		root, _ := newRootWithResource(t)
+		root, _ := newRootWithResource(t, "")
 		var out bytes.Buffer
 		root.Cmd.SetOut(&out)
 		root.Cmd.SetArgs([]string{"products"})
@@ -105,11 +111,93 @@ func TestCredentialCheck_GroupCommandWithoutLogin(t *testing.T) {
 		}
 	})
 	t.Run("unknown subcommand is a usage error", func(t *testing.T) {
-		root, _ := newRootWithResource(t)
+		root, _ := newRootWithResource(t, "")
 		root.Cmd.SetArgs([]string{"products", "bogus"})
 
 		if err := root.Cmd.Execute(); !errors.Is(err, commands.ErrUsage) {
 			t.Fatalf("Execute error = %v, want one wrapping ErrUsage", err)
 		}
 	})
+}
+
+func TestCredentialCheck_KeyForAnotherEnvironment(t *testing.T) {
+	mismatched := configtest.TestEnvKeyPrefix + "abc"
+	for name, tc := range map[string]struct {
+		storedKey, envVar string
+		args              []string
+	}{
+		"--api-key":      {args: []string{"products", "list", "--api-key", mismatched}},
+		"PADDLE_API_KEY": {envVar: mismatched, args: []string{"products", "list"}},
+		"stored login":   {storedKey: mismatched, args: []string{"products", "list"}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.envVar != "" {
+				t.Setenv("PADDLE_API_KEY", tc.envVar)
+			}
+			root, ran := newRootWithResource(t, tc.storedKey)
+			root.Cmd.SetArgs(tc.args)
+
+			err := root.Cmd.Execute()
+			if !errors.Is(err, client.ErrCredentialMismatch) {
+				t.Fatalf("Execute error = %v, want one wrapping ErrCredentialMismatch", err)
+			}
+			if code, _ := client.ExitCodeFor(err, commands.ErrUsage); code != client.ExitAuthFailure {
+				t.Errorf("exit code = %d, want %d", code, client.ExitAuthFailure)
+			}
+			if want := "--environment " + configtest.TestEnv; !strings.Contains(err.Error(), want) {
+				t.Errorf("error %q doesn't suggest %q", err, want)
+			}
+			if *ran {
+				t.Error("command ran with a key for another environment")
+			}
+		})
+	}
+}
+
+func TestCredentialCheck_KeyForAnotherEnvironmentAllowed(t *testing.T) {
+	mismatched := configtest.TestEnvKeyPrefix + "abc"
+	for name, tc := range map[string]struct {
+		args   []string
+		apiURL string
+	}{
+		"matching key":            {args: []string{"products", "list", "--api-key", configtest.TestEnvAPIKeyOnlyKeyPrefix + "abc"}},
+		"unknown key format":      {args: []string{"products", "list", "--api-key", "some_oauth_token"}},
+		"API URL override":        {args: []string{"products", "list", "--api-key", mismatched}, apiURL: "http://127.0.0.1:1"},
+		"command without the API": {args: []string{"environment", "--api-key", mismatched}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.apiURL != "" {
+				t.Setenv("PADDLE_API_URL", tc.apiURL)
+			}
+			root, ran := newRootWithResource(t, "")
+			root.Cmd.SetArgs(tc.args)
+
+			if err := root.Cmd.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if tc.args[0] == "products" && !*ran {
+				t.Error("command didn't run")
+			}
+		})
+	}
+}
+
+func TestLoginCmd_RefusesKeyForAnotherEnvironment(t *testing.T) {
+	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
+	root := commands.NewRoot(commands.RootConfig{ConfigPath: cfgPath})
+	root.Cmd.AddCommand(commands.NewLoginCmd(root))
+	root.Cmd.SetOut(io.Discard)
+	root.Cmd.SetErr(io.Discard)
+	root.Cmd.SetArgs([]string{"login", "--environment", configtest.TestEnv, "--api-key", configtest.TestEnvAPIKeyOnlyKeyPrefix + "abc"})
+
+	err := root.Cmd.Execute()
+	if !errors.Is(err, client.ErrCredentialMismatch) {
+		t.Fatalf("Execute error = %v, want one wrapping ErrCredentialMismatch", err)
+	}
+	if want := "--environment " + configtest.TestEnvAPIKeyOnly; !strings.Contains(err.Error(), want) {
+		t.Errorf("error %q doesn't suggest %q", err, want)
+	}
+	if _, statErr := os.Stat(cfgPath); !os.IsNotExist(statErr) {
+		t.Errorf("config file written for a refused key (stat err: %v)", statErr)
+	}
 }

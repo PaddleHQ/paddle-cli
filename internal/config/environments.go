@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"sort"
+	"strings"
 
 	"github.com/muesli/termenv"
 )
@@ -15,6 +16,8 @@ type Environment struct {
 	AuthDomain string   // OAuth issuer host for this environment
 	ClientID   string   // OAuth client ID (public client, PKCE; no secret). Empty means OAuth isn't configured for this environment yet.
 	Scopes     []string // OAuth scopes requested on login
+	// APIKeyPrefix starts the API keys this environment issues. Empty skips the key/environment check.
+	APIKeyPrefix string
 
 	// Color of the environment name in output. The zero value (black)
 	// renders the name dimmed instead.
@@ -43,20 +46,28 @@ const (
 	ScopeAPIWrite = "api_write"
 )
 
+// Prefixes of the API keys each environment issues.
+const (
+	sandboxKeyPrefix = "pdl_sdbx_apikey_" //nolint:gosec // key prefix, not a credential
+	liveKeyPrefix    = "pdl_live_apikey_" //nolint:gosec // key prefix, not a credential
+)
+
 var environments = map[string]Environment{
 	"sandbox": {
-		BaseURL:    "https://sandbox-api.paddle.com",
-		AuthDomain: "sandbox-id.paddle.com",
-		Scopes:     defaultScopes,
-		Color:      termenv.ANSIYellow,
+		BaseURL:      "https://sandbox-api.paddle.com",
+		AuthDomain:   "sandbox-id.paddle.com",
+		APIKeyPrefix: sandboxKeyPrefix,
+		Scopes:       defaultScopes,
+		Color:        termenv.ANSIYellow,
 	},
 	"production": {
-		BaseURL:    "https://api.paddle.com",
-		AuthDomain: "id.paddle.com",
-		ClientID:   "client_01M4WWX8WHPSPYQPT5W3EJYH3N",
-		Scopes:     defaultScopes,
-		Color:      termenv.ANSIBrightRed,
-		Bold:       true,
+		BaseURL:      "https://api.paddle.com",
+		AuthDomain:   "id.paddle.com",
+		APIKeyPrefix: liveKeyPrefix,
+		ClientID:     "client_01M4WWX8WHPSPYQPT5W3EJYH3N",
+		Scopes:       defaultScopes,
+		Color:        termenv.ANSIBrightRed,
+		Bold:         true,
 	},
 }
 
@@ -104,6 +115,17 @@ func OAuthConfig(env string) (Environment, error) {
 		return Environment{}, fmt.Errorf("%w for the %q environment", ErrOAuthNotSupported, env)
 	}
 	return e, nil
+}
+
+// APIKeyEnvironment returns the environment whose APIKeyPrefix key starts with,
+// or "" when it matches none (an OAuth token or an unknown key format).
+func APIKeyEnvironment(key string) string {
+	for _, name := range ValidEnvironments() {
+		if p := environments[name].APIKeyPrefix; p != "" && strings.HasPrefix(key, p) {
+			return name
+		}
+	}
+	return ""
 }
 
 // ValidEnvironments returns the names of all configured environments, sorted.
