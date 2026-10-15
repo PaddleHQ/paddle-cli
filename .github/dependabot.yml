@@ -1,0 +1,26 @@
+version: 2
+updates:
+  - package-ecosystem: "gomod"
+    directory: /
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "03:00"
+    labels:
+      - "norelease"
+    cooldown:
+      default-days: 7
+    groups:
+      go.mod:
+        patterns:
+          - "*"
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "wednesday"
+      time: "03:00"
+    labels:
+      - "norelease"
+    cooldown:
+      default-days: 7
