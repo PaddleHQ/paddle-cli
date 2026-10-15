@@ -5,7 +5,7 @@ name: Release
 on:
   push:
     branches:
-      - public_release
+      - main
   pull_request:
 
 permissions:
@@ -32,7 +32,7 @@ jobs:
   await_release:
     name: Wait for the release tag
     needs: check
-    if: github.event_name == 'push' && github.ref == 'refs/heads/public_release'
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
     permissions:
@@ -108,8 +108,8 @@ jobs:
         with:
           client-id: ${{ secrets.HOMEBREW_TAP_APP_CLIENT_ID }}
           private-key: ${{ secrets.HOMEBREW_TAP_APP_PRIVATE_KEY }}
-          owner: PaddleHQ-Playground
-          repositories: homebrew-cli-tap-test
+          owner: PaddleHQ
+          repositories: homebrew-tap
           permission-contents: write
           permission-pull-requests: write
 

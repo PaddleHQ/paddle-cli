@@ -54,15 +54,15 @@ homebrew_casks:
     directory: Casks
     skip_upload: auto
     repository:
-      owner: PaddleHQ-Playground
-      name: homebrew-cli-tap-test
+      owner: PaddleHQ
+      name: homebrew-tap
       branch: "paddle-{{ .Version }}"
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
       pull_request:
         enabled: true
         base:
-          owner: PaddleHQ-Playground
-          name: homebrew-cli-tap-test
+          owner: PaddleHQ
+          name: homebrew-tap
           branch: main
     hooks:
       post:

@@ -3,7 +3,7 @@ name: Release on Push
 on:
   push:
     branches:
-      - public_release
+      - main
 
 permissions:
   contents: write
