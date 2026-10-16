@@ -13,29 +13,29 @@ import (
 	"github.com/PaddleHQ/paddle-cli/internal/output"
 )
 
-// whoamiBody is the real /check/whoami response shape (condensed for tests).
+// whoamiBody is the real `GET /` response shape (condensed for tests).
 const whoamiBody = `{
 	"data": {
-		"auth_seller_id": "506",
-		"auth_user_id": "493",
-		"auth_publisher_id": null,
-		"auth_customer_ids": null,
-		"auth_classic_customer_ids": null,
-		"header_seller_id": "506",
-		"header_user_id": "493",
-		"header_publisher_id": null,
-		"header_customer_ids": null,
-		"header_classic_customer_ids": null,
-		"scopes": ["all.adjustment.read", "all.adjustment.write"]
+		"api": {
+			"documentation_url": "https://developer.paddle.com/api-reference/overview",
+			"environment": "production",
+			"name": "Paddle API",
+			"version": "1"
+		},
+		"caller": {
+			"account": { "id": "slr_01awf3", "name": "Paddle Roko" },
+			"auth_type": "oauth",
+			"permissions": ["all.adjustment.read", "all.adjustment.write"]
+		}
 	},
-	"meta": { "request_id": "req_01" }
+	"meta": { "environment": "production", "request_id": "req_01" }
 }`
 
 func newWhoamiServer(t *testing.T) *httptest.Server {
 	t.Helper()
 	return httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/check/whoami" {
-			t.Errorf("expected /check/whoami, got %s", r.URL.Path)
+		if r.URL.Path != "/" {
+			t.Errorf("expected /, got %s", r.URL.Path)
 		}
 		if got := r.Header.Get("Authorization"); got != "Bearer tok_abc" {
 			t.Errorf("expected bearer token header, got %q", got)
@@ -67,7 +67,7 @@ func newWhoamiRoot(t *testing.T, serverURL string) *commands.Root {
 }
 
 // TestWhoamiCmd_TableDefault verifies the curated table view:
-// environment, collapsed seller/user IDs, scope count.
+// environment, account, auth type, permission count.
 func TestWhoamiCmd_TableDefault(t *testing.T) {
 	server := newWhoamiServer(t)
 	defer server.Close()
@@ -84,18 +84,18 @@ func TestWhoamiCmd_TableDefault(t *testing.T) {
 	got := buf.String()
 
 	// curated fields present
-	for _, want := range []string{configtest.TestEnvAPIKeyOnly, "506", "493", "2 scopes"} {
+	for _, want := range []string{configtest.TestEnvAPIKeyOnly, "slr_01awf3", "Paddle Roko", "oauth", "2 permissions"} {
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Errorf("expected %q in table output, got:\n%s", want, got)
 		}
 	}
-	// raw scopes must NOT appear; they're replaced by the count
+	// raw permissions must NOT appear; they're replaced by the count
 	if bytes.Contains([]byte(got), []byte("all.adjustment.read")) {
-		t.Errorf("raw scope name should not appear in default table output, got:\n%s", got)
+		t.Errorf("raw permission name should not appear in default table output, got:\n%s", got)
 	}
 }
 
-// TestWhoamiCmd_TableFull verifies that --full expands scopes to individual names.
+// TestWhoamiCmd_TableFull verifies that --full expands permissions to individual names.
 func TestWhoamiCmd_TableFull(t *testing.T) {
 	server := newWhoamiServer(t)
 	defer server.Close()
@@ -111,20 +111,20 @@ func TestWhoamiCmd_TableFull(t *testing.T) {
 
 	got := buf.String()
 
-	// scope names must appear
+	// permission names must appear
 	for _, want := range []string{"all.adjustment.read", "all.adjustment.write"} {
 		if !bytes.Contains([]byte(got), []byte(want)) {
-			t.Errorf("expected scope %q in --full output, got:\n%s", want, got)
+			t.Errorf("expected permission %q in --full output, got:\n%s", want, got)
 		}
 	}
-	// scope count must NOT appear when --full is set
-	if bytes.Contains([]byte(got), []byte("2 scopes")) {
-		t.Errorf("scope count should not appear in --full output, got:\n%s", got)
+	// permission count must NOT appear when --full is set
+	if bytes.Contains([]byte(got), []byte("2 permissions")) {
+		t.Errorf("permission count should not appear in --full output, got:\n%s", got)
 	}
 }
 
 // TestWhoamiCmd_JSONPassthrough verifies that JSON format emits the full API
-// response (all data fields including scopes) with meta.environment injected.
+// response (all data fields including permissions) with meta.environment injected.
 func TestWhoamiCmd_JSONPassthrough(t *testing.T) {
 	server := newWhoamiServer(t)
 	defer server.Close()
@@ -141,7 +141,7 @@ func TestWhoamiCmd_JSONPassthrough(t *testing.T) {
 	got := buf.String()
 
 	// full API data fields present
-	for _, want := range []string{`"auth_seller_id"`, `"auth_user_id"`, `"all.adjustment.read"`} {
+	for _, want := range []string{`"auth_type"`, `"account"`, `"all.adjustment.read"`} {
 		if !bytes.Contains([]byte(got), []byte(want)) {
 			t.Errorf("expected %q in JSON output, got:\n%s", want, got)
 		}
