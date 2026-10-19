@@ -13,17 +13,23 @@ import (
 
 type whoamiAPIResponse struct {
 	Data struct {
-		AuthSellerID string   `json:"auth_seller_id"`
-		AuthUserID   string   `json:"auth_user_id"`
-		Scopes       []string `json:"scopes"`
+		Caller struct {
+			Account struct {
+				ID   string `json:"id"`
+				Name string `json:"name"`
+			} `json:"account"`
+			AuthType    string   `json:"auth_type"`
+			Permissions []string `json:"permissions"`
+		} `json:"caller"`
 	} `json:"data"`
 }
 
 type whoamiTableRow struct {
 	Environment string `json:"environment"`
-	SellerID    string `json:"seller_id"`
-	UserID      string `json:"user_id"`
-	Scopes      string `json:"scopes,omitempty"`
+	AccountID   string `json:"account_id"`
+	AccountName string `json:"account_name"`
+	AuthType    string `json:"auth_type"`
+	Permissions string `json:"permissions,omitempty"`
 }
 
 var errNotAuthenticated = errors.New("not authenticated for environment")
@@ -41,7 +47,7 @@ func NewWhoamiCmd(root *Root) *cobra.Command {
 				return fmt.Errorf("%w %q; run `paddle login` first", errNotAuthenticated, root.Environment)
 			}
 
-			resp, err := root.Client().Do("GET", "/check/whoami", nil, nil)
+			resp, err := root.Client().Do("GET", "/", nil, nil)
 			if err != nil {
 				return err
 			}
@@ -55,78 +61,75 @@ func NewWhoamiCmd(root *Root) *cobra.Command {
 			if opts.Format == output.FormatJSON {
 				// Pass raw body through: injectMetaEnvironment in printJSON
 				// handles meta.environment automatically via opts.Environment.
-				// --full has no effect on JSON (scopes always included in full data).
 				return output.Print(resp.Body, nil, opts)
 			}
-			return printWhoamiTable(resp.Body, full, opts)
+			return printWhoami(resp.Body, full, opts)
 		},
 	}
-	cmd.Flags().BoolVar(&full, "full", false, "Expand scope list in table output (JSON always includes full scopes)")
+	cmd.Flags().BoolVar(&full, "full", false, "Expand permission list in table output (JSON always includes full permissions)")
 	return cmd
 }
 
-// printWhoamiTable renders a curated table view of the /check/whoami response.
-// Default: one row with environment, collapsed seller/user IDs, and scope count.
-// With full=true: summary row (no scopes) followed by a scope-per-row table.
-func printWhoamiTable(body []byte, full bool, opts output.Options) error {
+// printWhoami renders a curated table view of the `GET /` response.
+// Default: one row with environment, account, auth type, and permission count.
+// With full=true: summary row (no permissions) followed by a permission-per-row table.
+func printWhoami(body []byte, full bool, opts output.Options) error {
 	var apiResp whoamiAPIResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {
 		return fmt.Errorf("parsing whoami response: %w", err)
 	}
-	d := apiResp.Data
+	caller := apiResp.Data.Caller
 
 	envName := opts.Profile.EnvName(opts.Environment)
-	sellerID := d.AuthSellerID
-	userID := d.AuthUserID
+
+	row := whoamiTableRow{
+		Environment: envName,
+		AccountID:   caller.Account.ID,
+		AccountName: caller.Account.Name,
+		AuthType:    caller.AuthType,
+	}
+	cols := []output.ColumnDef{
+		{Header: "ENVIRONMENT", Field: fieldEnvironment},
+		{Header: "ACCOUNT ID", Field: "account_id"},
+		{Header: "ACCOUNT NAME", Field: "account_name"},
+		{Header: "AUTH TYPE", Field: "auth_type"},
+	}
 
 	if !full {
-		scopeStr := fmt.Sprintf("%d scopes", len(d.Scopes))
-		payload, err := json.Marshal(whoamiTableRow{
-			Environment: envName,
-			SellerID:    sellerID,
-			UserID:      userID,
-			Scopes:      scopeStr,
-		})
-		if err != nil {
-			return fmt.Errorf("encoding whoami row: %w", err)
-		}
-		cols := []output.ColumnDef{
-			{Header: "ENVIRONMENT", Field: fieldEnvironment},
-			{Header: "SELLER ID", Field: "seller_id"},
-			{Header: "USER ID", Field: "user_id"},
-			{Header: "SCOPES", Field: "scopes"},
-		}
-		return output.Print(payload, cols, opts)
+		row.Permissions = fmt.Sprintf("%d permissions", len(caller.Permissions))
+		cols = append(cols, output.ColumnDef{Header: "PERMISSIONS", Field: "permissions"})
 	}
 
-	// --full: summary row without scopes, then scope list as separate rows.
-	summaryPayload, err := json.Marshal(whoamiTableRow{
-		Environment: envName,
-		SellerID:    sellerID,
-		UserID:      userID,
-	})
+	payload, err := json.Marshal(row)
 	if err != nil {
-		return fmt.Errorf("encoding whoami summary: %w", err)
+		return fmt.Errorf("encoding whoami row: %w", err)
 	}
-	summaryCols := []output.ColumnDef{
-		{Header: "ENVIRONMENT", Field: fieldEnvironment},
-		{Header: "SELLER ID", Field: "seller_id"},
-		{Header: "USER ID", Field: "user_id"},
-	}
-	if err := output.Print(summaryPayload, summaryCols, opts); err != nil {
+
+	if err := output.Print(payload, cols, opts); err != nil {
 		return err
 	}
 
-	type scopeRow struct {
-		Scope string `json:"scope"`
+	if full {
+		return printWhoamiPermissions(caller.Permissions, opts)
 	}
-	rows := make([]scopeRow, len(d.Scopes))
-	for i, s := range d.Scopes {
-		rows[i] = scopeRow{Scope: s}
+	return nil
+}
+
+// printWhoamiPermissions renders one permission per row.
+func printWhoamiPermissions(permissions []string, opts output.Options) error {
+	type permissionRow struct {
+		Permission string `json:"permission"`
 	}
-	scopePayload, err := json.Marshal(rows)
+
+	rows := make([]permissionRow, len(permissions))
+	for i, p := range permissions {
+		rows[i] = permissionRow{Permission: p}
+	}
+
+	payload, err := json.Marshal(rows)
 	if err != nil {
-		return fmt.Errorf("encoding whoami scopes: %w", err)
+		return fmt.Errorf("encoding whoami permissions: %w", err)
 	}
-	return output.Print(scopePayload, []output.ColumnDef{{Header: "SCOPE", Field: "scope"}}, opts)
+
+	return output.Print(payload, []output.ColumnDef{{Header: "PERMISSION", Field: "permission"}}, opts)
 }
