@@ -8,6 +8,7 @@ import (
 )
 
 func RegisterAll(parent *cobra.Command, c *client.Client, opts *output.Options) {
+	parent.AddCommand(NewAccountCmd(c, opts))
 	parent.AddCommand(NewAddressesCmd(c, opts))
 	parent.AddCommand(NewAdjustmentsCmd(c, opts))
 	parent.AddCommand(NewBusinessesCmd(c, opts))
@@ -31,6 +32,7 @@ func RegisterAll(parent *cobra.Command, c *client.Client, opts *output.Options) 
 	parent.AddCommand(NewPricingPreviewCmd(c, opts))
 	parent.AddCommand(NewProductsCmd(c, opts))
 	parent.AddCommand(NewReportsCmd(c, opts))
+	parent.AddCommand(NewSettingsCmd(c, opts))
 	parent.AddCommand(NewSimulationRunEventsCmd(c, opts))
 	parent.AddCommand(NewSimulationRunsCmd(c, opts))
 	parent.AddCommand(NewSimulationTypesCmd(c, opts))
