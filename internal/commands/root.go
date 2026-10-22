@@ -208,6 +208,9 @@ func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Confi
 	}
 	env := resolved.CurrentEnvironment
 	if accessToken == "" {
+		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth {
+			return "", nil
+		}
 		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
 			client.ErrNotAuthenticated, env)
 	}
@@ -294,6 +297,12 @@ const annotationCallsAPI = "paddle_calls_api"
 func callsAPIAnnotations() map[string]string {
 	return map[string]string{annotationCallsAPI: "true"}
 }
+
+// AnnotationNoAuth marks a generated command whose endpoint needs no
+// credential, so it runs without a login. A key it's given is still checked,
+// since the API rejects a bad one even there. The generator writes this key as
+// a literal, so keep them in step.
+const AnnotationNoAuth = "paddle_no_auth"
 
 // callsAPI reports whether cmd sends a request to the Paddle API: a resource
 // command (unless it only prints its --schema) or one marked annotationCallsAPI.

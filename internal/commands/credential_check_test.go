@@ -13,13 +13,15 @@ import (
 	"github.com/PaddleHQ/paddle-cli/internal/commands"
 	"github.com/PaddleHQ/paddle-cli/internal/config"
 	"github.com/PaddleHQ/paddle-cli/internal/config/configtest"
+	"github.com/PaddleHQ/paddle-cli/internal/generated"
 
 	"github.com/spf13/cobra"
 )
 
-// newRootWithResource builds a root with a "products" resource command whose
-// "list" and "create" leaves record whether they ran. storedKey, if set, is
-// stored as the login for the current environment.
+// newRootWithResource builds a root with "products list" and "products create",
+// and "countries list" marked as needing no credential, as the public endpoint
+// is. Each leaf records whether it ran. storedKey, if set, is stored as the
+// login for the current environment.
 func newRootWithResource(t *testing.T, storedKey string) (root *commands.Root, ran *bool) {
 	t.Helper()
 	cfgPath := filepath.Join(t.TempDir(), "config.yaml")
@@ -38,9 +40,15 @@ func newRootWithResource(t *testing.T, storedKey string) (root *commands.Root, r
 	create := &cobra.Command{Use: "create", RunE: run}
 	create.Flags().Bool("schema", false, "")
 	products.AddCommand(create)
+	countries := &cobra.Command{Use: "countries"}
+	countries.AddCommand(&cobra.Command{
+		Use:         "list",
+		Annotations: map[string]string{commands.AnnotationNoAuth: "true"},
+		RunE:        run,
+	})
 
 	root = commands.NewRoot(commands.RootConfig{ConfigPath: cfgPath})
-	root.Cmd.AddCommand(products, commands.NewAPICmd(root), commands.NewEnvironmentCmd(root))
+	root.Cmd.AddCommand(products, countries, commands.NewAPICmd(root), commands.NewEnvironmentCmd(root))
 	commands.AssignDefaultGroup(root.Cmd, commands.GroupIDResources)
 	commands.EnforceUnknownSubcommandError(root.Cmd) // as main does: group commands get a RunE
 	root.Cmd.SetOut(io.Discard)
@@ -78,9 +86,10 @@ func TestCredentialCheck_NotLoggedIn(t *testing.T) {
 
 func TestCredentialCheck_RunsWithoutCheck(t *testing.T) {
 	for name, args := range map[string][]string{
-		"api key flag":   {"products", "list", "--api-key", "pdl_sdbx_apikey_test"},
-		"schema only":    {"products", "create", "--schema"},
-		"no-API command": {"environment"},
+		"api key flag":    {"products", "list", "--api-key", "pdl_sdbx_apikey_test"},
+		"schema only":     {"products", "create", "--schema"},
+		"no-API command":  {"environment"},
+		"no-auth command": {"countries", "list"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, ran := newRootWithResource(t, "")
@@ -89,7 +98,7 @@ func TestCredentialCheck_RunsWithoutCheck(t *testing.T) {
 			if err := root.Cmd.Execute(); err != nil {
 				t.Fatalf("Execute: %v", err)
 			}
-			if args[0] == "products" && !*ran {
+			if args[0] != "environment" && !*ran {
 				t.Error("command didn't run")
 			}
 		})
@@ -129,6 +138,8 @@ func TestCredentialCheck_KeyForAnotherEnvironment(t *testing.T) {
 		"--api-key":      {args: []string{"products", "list", "--api-key", mismatched}},
 		"PADDLE_API_KEY": {envVar: mismatched, args: []string{"products", "list"}},
 		"stored login":   {storedKey: mismatched, args: []string{"products", "list"}},
+		// The API rejects a bad key even on an endpoint that needs none.
+		"no-auth command": {args: []string{"countries", "list", "--api-key", mismatched}},
 	} {
 		t.Run(name, func(t *testing.T) {
 			if tc.envVar != "" {
@@ -179,6 +190,28 @@ func TestCredentialCheck_KeyForAnotherEnvironmentAllowed(t *testing.T) {
 				t.Error("command didn't run")
 			}
 		})
+	}
+}
+
+// The generator marks commands for endpoints that need no credential with a
+// literal key; it must match the one the credential check reads.
+func TestCredentialCheck_GeneratedNoAuthCommandsAreMarked(t *testing.T) {
+	for _, cmd := range []*cobra.Command{
+		generated.NewCountriesCmd(nil, nil),
+		generated.NewCurrenciesCmd(nil, nil),
+		generated.NewIpAddressesCmd(nil, nil),
+	} {
+		for _, leaf := range cmd.Commands() {
+			if _, ok := leaf.Annotations[commands.AnnotationNoAuth]; !ok {
+				t.Errorf("%s %s isn't marked %s", cmd.Name(), leaf.Name(), commands.AnnotationNoAuth)
+			}
+		}
+	}
+	products := generated.NewProductsCmd(nil, nil)
+	for _, leaf := range products.Commands() {
+		if _, ok := leaf.Annotations[commands.AnnotationNoAuth]; ok {
+			t.Errorf("products %s is marked %s, but needs a credential", leaf.Name(), commands.AnnotationNoAuth)
+		}
 	}
 }
 
