@@ -21,9 +21,10 @@ func NewIpAddressesCmd(c *client.Client, opts *output.Options) *cobra.Command {
 
 func newIpAddressesGetCmd(c *client.Client, opts *output.Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "get",
-		Short: "Get Paddle IP addresses",
-		Args:  cobra.NoArgs,
+		Use:         "get",
+		Short:       "Get Paddle IP addresses",
+		Annotations: map[string]string{"paddle_no_auth": "true"},
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/ips"
 
