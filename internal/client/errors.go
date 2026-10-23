@@ -18,6 +18,8 @@ type APIError struct {
 	RequestID        string       `json:"request_id,omitempty"`
 	Retryable        bool         `json:"retryable"`
 	Errors           []FieldError `json:"errors,omitempty"`
+
+	noCredential bool // the request carried no credential
 }
 
 // FieldError is a validation error for a single request field.
@@ -37,8 +39,9 @@ func (e *APIError) Error() string {
 // Detail when it is not a Paddle error envelope.
 func ParseAPIError(resp *Response) *APIError {
 	apiErr := &APIError{
-		Status:    resp.StatusCode,
-		Retryable: IsRetryableStatus(resp.StatusCode),
+		Status:       resp.StatusCode,
+		Retryable:    IsRetryableStatus(resp.StatusCode),
+		noCredential: resp.noCredential,
 	}
 
 	if resp.Headers != nil {
@@ -119,7 +122,7 @@ func (e *APIError) ExitCode() int {
 	case 401:
 		return ExitAuthFailure
 	case 403:
-		if authFailureCodes[e.Code] {
+		if e.notAuthenticated() {
 			return ExitAuthFailure
 		}
 		return ExitForbidden
@@ -134,6 +137,12 @@ func (e *APIError) ExitCode() int {
 		return ExitServerError
 	}
 	return ExitGeneralError
+}
+
+// notAuthenticated reports whether a 403 means "not authenticated". With no
+// credential sent it can't mean anything else, whatever code the API gives.
+func (e *APIError) notAuthenticated() bool {
+	return e.noCredential || authFailureCodes[e.Code]
 }
 
 // IsRetryableStatus reports whether an HTTP status code indicates a transient
