@@ -166,6 +166,27 @@ func TestAPIError_ExitCode_StatusMatrix(t *testing.T) {
 	}
 }
 
+// The Paddle API answers authentication failures with 403, so the error code,
+// not the status, separates "not authenticated" from "not permitted".
+func TestAPIError_ExitCode_403ByErrorCode(t *testing.T) {
+	cases := []struct {
+		code string
+		want int
+	}{
+		{"authentication_missing", client.ExitAuthFailure},
+		{"authentication_malformed", client.ExitAuthFailure},
+		{"invalid_token", client.ExitAuthFailure},
+		{"forbidden", client.ExitForbidden},
+		{"", client.ExitForbidden},
+	}
+	for _, tc := range cases {
+		err := &client.APIError{Status: 403, Code: tc.code}
+		if got := err.ExitCode(); got != tc.want {
+			t.Errorf("403 %q: ExitCode() = %d, want %d", tc.code, got, tc.want)
+		}
+	}
+}
+
 // timeoutError satisfies net.Error with Timeout()=true.
 type timeoutError struct{}
 
