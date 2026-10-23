@@ -88,9 +88,10 @@ func (c *Client) Do(method, path string, queryParams map[string]string, body []b
 	}
 
 	return &Response{
-		StatusCode: resp.StatusCode,
-		Body:       respBody,
-		Headers:    resp.Header,
+		StatusCode:   resp.StatusCode,
+		Body:         respBody,
+		Headers:      resp.Header,
+		noCredential: req.Header.Get("Authorization") == "",
 	}, nil
 }
 
@@ -140,6 +141,8 @@ type Response struct {
 	StatusCode int
 	Body       []byte
 	Headers    http.Header
+	// noCredential is set when the request carried no Authorization header.
+	noCredential bool
 }
 
 // setAttributionHeaders sets the analytics headers to attribute usage.

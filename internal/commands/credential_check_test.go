@@ -130,8 +130,9 @@ func TestCredentialCheck_APIWithoutLoginLeavesItToTheAPI(t *testing.T) {
 	if auth != "" {
 		t.Errorf("Authorization = %q, want none", auth)
 	}
-	if code, _ := client.ExitCodeFor(err, commands.ErrUsage); code != client.ExitForbidden {
-		t.Errorf("exit code = %d, want the API's 403 (%d); error: %v", code, client.ExitForbidden, err)
+	// With no credential sent, the API's 403 means "not authenticated".
+	if code, _ := client.ExitCodeFor(err, commands.ErrUsage); code != client.ExitAuthFailure {
+		t.Errorf("exit code = %d, want %d; error: %v", code, client.ExitAuthFailure, err)
 	}
 }
 
