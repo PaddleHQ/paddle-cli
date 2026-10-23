@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/http/httptest"
 	"net/url"
 	"testing"
 
@@ -163,6 +164,61 @@ func TestAPIError_ExitCode_StatusMatrix(t *testing.T) {
 		if got := err.ExitCode(); got != tc.want {
 			t.Errorf("status %d: ExitCode() = %d, want %d", tc.status, got, tc.want)
 		}
+	}
+}
+
+// The Paddle API answers authentication failures with 403, so the error code,
+// not the status, separates "not authenticated" from "not permitted".
+func TestAPIError_ExitCode_403ByErrorCode(t *testing.T) {
+	cases := []struct {
+		code string
+		want int
+	}{
+		{"authentication_missing", client.ExitAuthFailure},
+		{"authentication_malformed", client.ExitAuthFailure},
+		{"invalid_token", client.ExitAuthFailure},
+		{"forbidden", client.ExitForbidden},
+		{"", client.ExitForbidden},
+	}
+	for _, tc := range cases {
+		err := &client.APIError{Status: 403, Code: tc.code}
+		if got := err.ExitCode(); got != tc.want {
+			t.Errorf("403 %q: ExitCode() = %d, want %d", tc.code, got, tc.want)
+		}
+	}
+}
+
+// A 403 to a request that carried no credential can only mean "not
+// authenticated", even when the API calls it forbidden.
+func TestParseAPIError_403WithoutCredentialIsAuthFailure(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"type":"request_error","code":"forbidden","detail":"denied"}}`))
+	}))
+	defer server.Close()
+
+	for name, tc := range map[string]struct {
+		cfg  client.Config
+		want int
+	}{
+		"no credential":        {cfg: client.Config{BaseURL: server.URL}, want: client.ExitAuthFailure},
+		"access token":         {cfg: client.Config{BaseURL: server.URL, AccessToken: "tok"}, want: client.ExitForbidden},
+		"Authorization header": {cfg: client.Config{BaseURL: server.URL, Headers: map[string]string{"Authorization": "Bearer tok"}}, want: client.ExitForbidden},
+	} {
+		t.Run(name, func(t *testing.T) {
+			resp, err := client.New(tc.cfg).Do("GET", "/customers", nil, nil)
+			if err != nil {
+				t.Fatal(err)
+			}
+			apiErr := client.ParseAPIError(resp)
+			if apiErr.Code != "forbidden" {
+				t.Fatalf("Code = %q, want forbidden", apiErr.Code)
+			}
+			if got := apiErr.ExitCode(); got != tc.want {
+				t.Errorf("ExitCode() = %d, want %d", got, tc.want)
+			}
+		})
 	}
 }
 

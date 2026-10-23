@@ -42,7 +42,6 @@ type Root struct {
 	Environment      string // resolved current environment, populated in setup
 	BannerSuppressed bool   // resolved suppression from flag/env/config
 	NonInteractive   bool   // --non-interactive: disables prompts without changing output format
-	HasCredential    bool   // true once setup() resolves a non-empty bearer credential (API key or OAuth token)
 }
 
 // NewRoot builds the root command with its persistent flags and command groups.
@@ -128,11 +127,10 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 		apiURL, _ = config.EnvironmentURL(resolved.CurrentEnvironment)
 	}
 
-	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
+	accessToken, err := r.resolveCredential(cmd, cfg, resolved, cfgPath)
 	if err != nil {
 		return err
 	}
-	r.HasCredential = accessToken != ""
 
 	r.ClientPtr.Configure(client.Config{
 		BaseURL:     apiURL,
@@ -198,6 +196,44 @@ func resolveOutputOptions(cmd *cobra.Command, resolved *config.Config) (output.O
 	return opts, nil
 }
 
+// resolveCredential returns the bearer credential, refusing up front a command
+// that calls the API without one rather than letting the API reject it.
+func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) (string, error) {
+	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
+	if err != nil {
+		return "", err
+	}
+	if !callsAPI(cmd) {
+		return accessToken, nil
+	}
+	env := resolved.CurrentEnvironment
+	if accessToken == "" {
+		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth || hasAuthorizationHeader(cmd) {
+			return "", nil
+		}
+		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
+			client.ErrNotAuthenticated, env)
+	}
+	// PADDLE_API_URL points away from env's host, so env's key format doesn't apply.
+	if os.Getenv("PADDLE_API_URL") == "" {
+		if err := checkKeyEnvironment(accessToken, env); err != nil {
+			return "", err
+		}
+	}
+	return accessToken, nil
+}
+
+// checkKeyEnvironment returns an ErrCredentialMismatch error when key is an
+// API key issued for an environment other than env.
+func checkKeyEnvironment(key, env string) error {
+	keyEnv := config.APIKeyEnvironment(key)
+	if keyEnv == "" || keyEnv == env {
+		return nil
+	}
+	return fmt.Errorf("%w: it's a %s key, but the environment is %q; pass --environment %s",
+		client.ErrCredentialMismatch, keyEnv, env, keyEnv)
+}
+
 // resolveAccessToken returns the bearer credential: --api-key, then
 // PADDLE_API_KEY, then the stored credential (refreshing an expiring OAuth token).
 func (r *Root) resolveAccessToken(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) (string, error) {
@@ -244,6 +280,17 @@ func resolveHeaders(cmd *cobra.Command) map[string]string {
 	return headers
 }
 
+// hasAuthorizationHeader reports whether --header or PADDLE_HEADER sets
+// Authorization, which then stands in for the stored credential.
+func hasAuthorizationHeader(cmd *cobra.Command) bool {
+	for k := range resolveHeaders(cmd) {
+		if strings.EqualFold(strings.TrimSpace(k), "Authorization") {
+			return true
+		}
+	}
+	return false
+}
+
 // Client returns the API client configured during setup.
 func (r *Root) Client() *client.Client {
 	return r.ClientPtr
@@ -252,6 +299,42 @@ func (r *Root) Client() *client.Client {
 // OutputOpts returns a copy of the output options resolved during setup.
 func (r *Root) OutputOpts() output.Options {
 	return *r.OutputPtr
+}
+
+// annotationCallsAPI marks a hand-crafted command that calls the Paddle API,
+// so it needs a credential. Resource commands are covered by their group.
+const annotationCallsAPI = "paddle_calls_api"
+
+func callsAPIAnnotations(extra ...string) map[string]string {
+	a := make(map[string]string, len(extra)+1)
+	for _, key := range append([]string{annotationCallsAPI}, extra...) {
+		a[key] = "true"
+	}
+	return a
+}
+
+// AnnotationNoAuth lets a command run without a login: a generated command for
+// a public endpoint, or `paddle api`. A key it's given is still checked, since
+// the API rejects a bad one even there. The generator writes this key as a
+// literal, so keep them in step.
+const AnnotationNoAuth = "paddle_no_auth"
+
+// callsAPI reports whether cmd sends a request to the Paddle API: a resource
+// command (unless it only prints its --schema) or one marked annotationCallsAPI.
+// Group commands only print help or a usage error, so they never do.
+func callsAPI(cmd *cobra.Command) bool {
+	if cmd.HasSubCommands() {
+		return false
+	}
+	if schema, _ := cmd.Flags().GetBool("schema"); schema {
+		return false
+	}
+	top := cmd
+	for top.HasParent() && top.Parent().HasParent() {
+		top = top.Parent()
+	}
+	_, marked := cmd.Annotations[annotationCallsAPI]
+	return marked || (top != cmd.Root() && top.GroupID == GroupIDResources)
 }
 
 // isAgentEnvEnabled reports whether the process is running inside a known

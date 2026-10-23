@@ -18,6 +18,8 @@ type APIError struct {
 	RequestID        string       `json:"request_id,omitempty"`
 	Retryable        bool         `json:"retryable"`
 	Errors           []FieldError `json:"errors,omitempty"`
+
+	noCredential bool // the request carried no credential
 }
 
 // FieldError is a validation error for a single request field.
@@ -37,8 +39,9 @@ func (e *APIError) Error() string {
 // Detail when it is not a Paddle error envelope.
 func ParseAPIError(resp *Response) *APIError {
 	apiErr := &APIError{
-		Status:    resp.StatusCode,
-		Retryable: IsRetryableStatus(resp.StatusCode),
+		Status:       resp.StatusCode,
+		Retryable:    IsRetryableStatus(resp.StatusCode),
+		noCredential: resp.noCredential,
 	}
 
 	if resp.Headers != nil {
@@ -76,6 +79,14 @@ func ParseAPIError(resp *Response) *APIError {
 	return apiErr
 }
 
+// ErrNotAuthenticated marks a command that needs a credential run without one.
+// It exits with ExitAuthFailure.
+var ErrNotAuthenticated = errors.New("not logged in")
+
+// ErrCredentialMismatch marks an API key issued for a different environment
+// than the one targeted. It exits with ExitAuthFailure.
+var ErrCredentialMismatch = errors.New("API key is for a different environment")
+
 // Exit codes per the safety spec. Codes are HTTP-derived where possible so
 // agents can branch on failure class without parsing error prose.
 const (
@@ -83,8 +94,8 @@ const (
 	ExitGeneralError = 1   // fallback for unclassified errors
 	ExitUsageError   = 2   // wrong flags / unknown subcommand / bad args
 	ExitNotFound     = 3   // 404
-	ExitAuthFailure  = 4   // 401: not authenticated
-	ExitForbidden    = 5   // 403: authenticated but not allowed
+	ExitAuthFailure  = 4   // 401, or 403 with an authentication error code: not authenticated
+	ExitForbidden    = 5   // other 403: authenticated but not allowed
 	ExitRateLimited  = 6   // 429
 	ExitValidation   = 7   // 400 / 422: request body or query rejected
 	ExitConflict     = 8   // 409
@@ -92,8 +103,16 @@ const (
 	ExitTimeout      = 124 // request deadline exceeded
 )
 
+// authFailureCodes are the 403 error codes that mean the request wasn't
+// authenticated. The Paddle API uses 403 for these, not 401.
+var authFailureCodes = map[string]bool{
+	"authentication_missing":   true,
+	"authentication_malformed": true,
+	"invalid_token":            true,
+}
+
 // ExitCode maps the HTTP status carried by an APIError onto the semantic exit
-// code spec. Anything outside the recognized set falls through to
+// code spec, using the error code to tell authentication failures apart. Anything outside the recognized set falls through to
 // ExitGeneralError so unexpected statuses are still distinguishable from
 // usage errors and timeouts.
 func (e *APIError) ExitCode() int {
@@ -103,6 +122,9 @@ func (e *APIError) ExitCode() int {
 	case 401:
 		return ExitAuthFailure
 	case 403:
+		if e.notAuthenticated() {
+			return ExitAuthFailure
+		}
 		return ExitForbidden
 	case 404:
 		return ExitNotFound
@@ -115,6 +137,12 @@ func (e *APIError) ExitCode() int {
 		return ExitServerError
 	}
 	return ExitGeneralError
+}
+
+// notAuthenticated reports whether a 403 means "not authenticated". With no
+// credential sent it can't mean anything else, whatever code the API gives.
+func (e *APIError) notAuthenticated() bool {
+	return e.noCredential || authFailureCodes[e.Code]
 }
 
 // IsRetryableStatus reports whether an HTTP status code indicates a transient
@@ -141,6 +169,10 @@ func ExitCodeFor(err error, usageSentinel error) (int, *APIError) {
 	if apiErr, ok := errors.AsType[*APIError](err); ok {
 		code := apiErr.ExitCode()
 		return code, apiErr
+	}
+
+	if errors.Is(err, ErrNotAuthenticated) || errors.Is(err, ErrCredentialMismatch) {
+		return ExitAuthFailure, nil
 	}
 
 	if isTimeoutError(err) {
