@@ -138,7 +138,7 @@ func (r *Root) configureClient(cmd *cobra.Command, cfg, resolved *config.Config,
 		return err
 	}
 
-	accessToken, err := r.resolveCredential(cmd, cfg, resolved, cfgPath)
+	accessToken, err := r.resolveCredential(cmd, cfg, resolved, cfgPath, headers)
 	if err != nil {
 		return err
 	}
@@ -209,7 +209,9 @@ func resolveOutputOptions(cmd *cobra.Command, resolved *config.Config) (output.O
 
 // resolveCredential returns the bearer credential, refusing up front a command
 // that calls the API without one rather than letting the API reject it.
-func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) (string, error) {
+func (r *Root) resolveCredential(
+	cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string, headers map[string]string,
+) (string, error) {
 	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
 	if err != nil {
 		return "", err
@@ -219,7 +221,7 @@ func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Confi
 	}
 	env := resolved.CurrentEnvironment
 	if accessToken == "" {
-		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth {
+		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth || hasAuthorizationHeader(headers) {
 			return "", nil
 		}
 		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
@@ -305,6 +307,17 @@ func resolveHeaders(cmd *cobra.Command) (map[string]string, error) {
 		headers[k] = v
 	}
 	return headers, nil
+}
+
+// hasAuthorizationHeader reports whether --header or PADDLE_HEADER sets
+// Authorization, which then stands in for the stored credential.
+func hasAuthorizationHeader(headers map[string]string) bool {
+	for k := range headers {
+		if strings.EqualFold(strings.TrimSpace(k), "Authorization") {
+			return true
+		}
+	}
+	return false
 }
 
 // Client returns the API client configured during setup.
