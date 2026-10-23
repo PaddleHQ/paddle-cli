@@ -91,8 +91,8 @@ const (
 	ExitGeneralError = 1   // fallback for unclassified errors
 	ExitUsageError   = 2   // wrong flags / unknown subcommand / bad args
 	ExitNotFound     = 3   // 404
-	ExitAuthFailure  = 4   // 401: not authenticated
-	ExitForbidden    = 5   // 403: authenticated but not allowed
+	ExitAuthFailure  = 4   // 401, or 403 with an authentication error code: not authenticated
+	ExitForbidden    = 5   // other 403: authenticated but not allowed
 	ExitRateLimited  = 6   // 429
 	ExitValidation   = 7   // 400 / 422: request body or query rejected
 	ExitConflict     = 8   // 409
@@ -100,8 +100,16 @@ const (
 	ExitTimeout      = 124 // request deadline exceeded
 )
 
+// authFailureCodes are the 403 error codes that mean the request wasn't
+// authenticated. The Paddle API uses 403 for these, not 401.
+var authFailureCodes = map[string]bool{
+	"authentication_missing":   true,
+	"authentication_malformed": true,
+	"invalid_token":            true,
+}
+
 // ExitCode maps the HTTP status carried by an APIError onto the semantic exit
-// code spec. Anything outside the recognized set falls through to
+// code spec, using the error code to tell authentication failures apart. Anything outside the recognized set falls through to
 // ExitGeneralError so unexpected statuses are still distinguishable from
 // usage errors and timeouts.
 func (e *APIError) ExitCode() int {
@@ -111,6 +119,9 @@ func (e *APIError) ExitCode() int {
 	case 401:
 		return ExitAuthFailure
 	case 403:
+		if authFailureCodes[e.Code] {
+			return ExitAuthFailure
+		}
 		return ExitForbidden
 	case 404:
 		return ExitNotFound
