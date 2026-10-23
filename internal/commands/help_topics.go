@@ -133,7 +133,7 @@ func exitCodesTopic() string {
 	return `Exit Codes: Paddle CLI exit code reference
 
   0   Success
-  1   General error (unexpected error, request failed, auth missing)
+  1   General error (unexpected error, request failed)
   2   Usage error (unknown flag, unknown subcommand, missing required argument,
       destructive op without --confirm in non-interactive context)
   3   Not found (API returned 404)
