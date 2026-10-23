@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"errors"
 	"io"
+	"net/http"
+	"net/http/httptest"
 	"os"
 	"path/filepath"
 	"strings"
@@ -59,7 +61,6 @@ func newRootWithResource(t *testing.T, storedKey string) (root *commands.Root, r
 func TestCredentialCheck_NotLoggedIn(t *testing.T) {
 	for name, args := range map[string][]string{
 		"resource command": {"products", "list"},
-		"api command":      {"api", "/products"},
 	} {
 		t.Run(name, func(t *testing.T) {
 			root, ran := newRootWithResource(t, "")
@@ -105,6 +106,35 @@ func TestCredentialCheck_RunsWithoutCheck(t *testing.T) {
 	}
 }
 
+// `paddle api` takes any path, so without a login it sends the request bare
+// and leaves the API to answer, as it does for a public endpoint.
+func TestCredentialCheck_APIWithoutLoginLeavesItToTheAPI(t *testing.T) {
+	var sent bool
+	var auth string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		sent, auth = true, r.Header.Get("Authorization")
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusForbidden)
+		_, _ = w.Write([]byte(`{"error":{"type":"request_error","code":"forbidden","detail":"denied"}}`))
+	}))
+	defer server.Close()
+	t.Setenv("PADDLE_API_URL", server.URL)
+
+	root, _ := newRootWithResource(t, "")
+	root.Cmd.SetArgs([]string{"api", "/products"})
+	err := root.Cmd.Execute()
+
+	if !sent {
+		t.Fatalf("request wasn't sent; Execute error = %v", err)
+	}
+	if auth != "" {
+		t.Errorf("Authorization = %q, want none", auth)
+	}
+	if code, _ := client.ExitCodeFor(err, commands.ErrUsage); code != client.ExitForbidden {
+		t.Errorf("exit code = %d, want the API's 403 (%d); error: %v", code, client.ExitForbidden, err)
+	}
+}
+
 func TestCredentialCheck_GroupCommandWithoutLogin(t *testing.T) {
 	t.Run("lists subcommands", func(t *testing.T) {
 		root, _ := newRootWithResource(t, "")
@@ -138,6 +168,7 @@ func TestCredentialCheck_KeyForAnotherEnvironment(t *testing.T) {
 		"--api-key":      {args: []string{"products", "list", "--api-key", mismatched}},
 		"PADDLE_API_KEY": {envVar: mismatched, args: []string{"products", "list"}},
 		"stored login":   {storedKey: mismatched, args: []string{"products", "list"}},
+		"api command":    {args: []string{"api", "/products", "--api-key", mismatched}},
 		// The API rejects a bad key even on an endpoint that needs none.
 		"no-auth command": {args: []string{"countries", "list", "--api-key", mismatched}},
 	} {

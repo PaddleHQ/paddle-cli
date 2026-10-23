@@ -294,14 +294,18 @@ func (r *Root) OutputOpts() output.Options {
 // so it needs a credential. Resource commands are covered by their group.
 const annotationCallsAPI = "paddle_calls_api"
 
-func callsAPIAnnotations() map[string]string {
-	return map[string]string{annotationCallsAPI: "true"}
+func callsAPIAnnotations(extra ...string) map[string]string {
+	a := make(map[string]string, len(extra)+1)
+	for _, key := range append([]string{annotationCallsAPI}, extra...) {
+		a[key] = "true"
+	}
+	return a
 }
 
-// AnnotationNoAuth marks a generated command whose endpoint needs no
-// credential, so it runs without a login. A key it's given is still checked,
-// since the API rejects a bad one even there. The generator writes this key as
-// a literal, so keep them in step.
+// AnnotationNoAuth lets a command run without a login: a generated command for
+// a public endpoint, or `paddle api`. A key it's given is still checked, since
+// the API rejects a bad one even there. The generator writes this key as a
+// literal, so keep them in step.
 const AnnotationNoAuth = "paddle_no_auth"
 
 // callsAPI reports whether cmd sends a request to the Paddle API: a resource

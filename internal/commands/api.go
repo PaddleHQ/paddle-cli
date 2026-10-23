@@ -30,7 +30,7 @@ func NewAPICmd(root *Root) *cobra.Command {
 			"The path may include an embedded query string (e.g. /customers?status=active) which is merged with --query flags; " +
 			"on conflict, --query wins.",
 		GroupID:     GroupIDOther,
-		Annotations: callsAPIAnnotations(),
+		Annotations: callsAPIAnnotations(AnnotationNoAuth),
 		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAPI(cmd, root, args[0])
