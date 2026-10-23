@@ -208,7 +208,7 @@ func (r *Root) resolveCredential(cmd *cobra.Command, cfg, resolved *config.Confi
 	}
 	env := resolved.CurrentEnvironment
 	if accessToken == "" {
-		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth {
+		if _, noAuth := cmd.Annotations[AnnotationNoAuth]; noAuth || hasAuthorizationHeader(cmd) {
 			return "", nil
 		}
 		return "", fmt.Errorf("%w to %q; run 'paddle login', or pass --api-key or set PADDLE_API_KEY",
@@ -278,6 +278,17 @@ func resolveHeaders(cmd *cobra.Command) map[string]string {
 		}
 	}
 	return headers
+}
+
+// hasAuthorizationHeader reports whether --header or PADDLE_HEADER sets
+// Authorization, which then stands in for the stored credential.
+func hasAuthorizationHeader(cmd *cobra.Command) bool {
+	for k := range resolveHeaders(cmd) {
+		if strings.EqualFold(strings.TrimSpace(k), "Authorization") {
+			return true
+		}
+	}
+	return false
 }
 
 // Client returns the API client configured during setup.

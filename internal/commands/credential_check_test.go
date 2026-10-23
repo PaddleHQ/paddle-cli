@@ -135,6 +135,32 @@ func TestCredentialCheck_APIWithoutLoginLeavesItToTheAPI(t *testing.T) {
 	}
 }
 
+// An Authorization header overrides the stored credential, so it counts as one.
+func TestCredentialCheck_AuthorizationHeaderCountsAsCredential(t *testing.T) {
+	for name, tc := range map[string]struct {
+		args      []string
+		envHeader string
+	}{
+		"--header":      {args: []string{"products", "list", "--header", "Authorization: Bearer some_token"}},
+		"PADDLE_HEADER": {args: []string{"products", "list"}, envHeader: "authorization: Bearer some_token"},
+	} {
+		t.Run(name, func(t *testing.T) {
+			if tc.envHeader != "" {
+				t.Setenv("PADDLE_HEADER", tc.envHeader)
+			}
+			root, ran := newRootWithResource(t, "")
+			root.Cmd.SetArgs(tc.args)
+
+			if err := root.Cmd.Execute(); err != nil {
+				t.Fatalf("Execute: %v", err)
+			}
+			if !*ran {
+				t.Error("command didn't run")
+			}
+		})
+	}
+}
+
 func TestCredentialCheck_GroupCommandWithoutLogin(t *testing.T) {
 	t.Run("lists subcommands", func(t *testing.T) {
 		root, _ := newRootWithResource(t, "")
