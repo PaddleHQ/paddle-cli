@@ -14,7 +14,7 @@ import (
 func NewSubscriptionHistoryCmd(c *client.Client, opts *output.Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "subscription-history",
-		Short: "",
+		Short: "Subscription history entries describe the changes made to a subscription over its lifetime, including what changed, when, and who made the change.",
 	}
 
 	cmd.AddCommand(newSubscriptionHistoryListCmd(c, opts))
@@ -49,6 +49,12 @@ func newSubscriptionHistoryListCmd(c *client.Client, opts *output.Options) *cobr
 			}
 			if v, _ := cmd.Flags().GetString("occurred-at"); v != "" {
 				qp["occurred_at"] = v
+			}
+			if v, _ := cmd.Flags().GetString("occurred-at-lte"); v != "" {
+				qp["occurred_at[LTE]"] = v
+			}
+			if v, _ := cmd.Flags().GetString("occurred-at-gte"); v != "" {
+				qp["occurred_at[GTE]"] = v
 			}
 			if v, _ := cmd.Flags().GetString("after"); v != "" {
 				qp["after"] = v
@@ -85,12 +91,14 @@ func newSubscriptionHistoryListCmd(c *client.Client, opts *output.Options) *cobr
 	cmd.Flags().String("action", "", "Return history entries that match the specified action. Use a comma-separated list to specify multiple action values.")
 	cmd.Flags().String("source", "", "Return history entries that match the specified source. Use a comma-separated list to specify multiple source values.")
 	cmd.Flags().String("actor-type", "", "Return history entries that match the specified actor type. Use a comma-separated list to specify multiple actor type values.")
-	cmd.Flags().String("actor-id", "", "Return history entries that match the specified actor ID. Use a comma-separated list to specify multiple actor ID values. Only applicable if `actor_type` is also selected.")
+	cmd.Flags().String("actor-id", "", "Return history entries that match the specified actor ID. Use a comma-separated list to specify multiple actor ID values. Only applicable if 'actor_type' is also selected.")
 	cmd.Flags().String("reason", "", "Return history entries that match the specified reason. Use a comma-separated list to specify multiple reason values.")
-	cmd.Flags().String("occurred-at", "", "Return entities that occurred at a specific time. Use `[LTE]` (less than or equal to) or `[GTE]` (greater than or equal to) operators with an RFC 3339 datetime string. For example, `occurred_at[LTE]=2023-04-18T17:03:26` or `occurred_at[GTE]=2023-04-18T17:03:26`.")
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
-	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `50`; Maximum: `200`.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[DESC]`.\n\nValid fields for ordering: `id`.")
+	cmd.Flags().String("occurred-at", "", "Return entities that occurred at a specific time. Use '[LTE]' (less than or equal to) or '[GTE]' (greater than or equal to) operators with an RFC 3339 datetime string. For example, 'occurred_at[LTE]=2023-04-18T17:03:26Z' or 'occurred_at[GTE]=2023-04-18T17:03:26Z'.")
+	cmd.Flags().String("occurred-at-lte", "", "Return entities with occurred_at at or before this value.")
+	cmd.Flags().String("occurred-at-gte", "", "Return entities with occurred_at at or after this value.")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
+	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '50'; Maximum: '200'.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[DESC]'.\n\nValid fields for ordering: 'id'.")
 
 	return cmd
 }

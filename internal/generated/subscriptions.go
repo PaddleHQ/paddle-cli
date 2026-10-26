@@ -102,15 +102,15 @@ func newSubscriptionsListCmd(c *client.Client, opts *output.Options) *cobra.Comm
 	}
 
 	cmd.Flags().String("id", "", "Return only the IDs specified. Use a comma-separated list to get multiple entities.")
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
-	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `50`; Maximum: `200`.")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
+	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '50'; Maximum: '200'.")
 	cmd.Flags().String("address-id", "", "Return entities related to the specified address. Use a comma-separated list to specify multiple address IDs.")
 	cmd.Flags().String("collection-mode", "", "Return entities that match the specified collection mode.")
 	cmd.Flags().String("customer-id", "", "Return entities related to the specified customer. Use a comma-separated list to specify multiple customer IDs.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[ASC]`.\n\nValid fields for ordering: `id`.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[ASC]'.\n\nValid fields for ordering: 'id'.")
 	cmd.Flags().String("price-id", "", "Return entities related to the specified price. Use a comma-separated list to specify multiple price IDs.")
 	cmd.Flags().String("scheduled-change-action", "", "Return subscriptions that have a scheduled change. Use a comma-separated list to specify multiple scheduled change actions.")
-	cmd.Flags().String("next-billed-at", "", "Return entities next billed at a specific time. Pass `null` to return entities with no next billing date.\n")
+	cmd.Flags().String("next-billed-at", "", "Return entities next billed at a specific time. Pass 'null' to return entities with no next billing date.\n")
 	cmd.Flags().String("status", "", "Return entities that match the specified status. Use a comma-separated list to specify multiple status values.")
 
 	return cmd
