@@ -88,11 +88,11 @@ func newDiscountsListCmd(c *client.Client, opts *output.Options) *cobra.Command 
 	}
 
 	cmd.Flags().String("id", "", "Return only the IDs specified. Use a comma-separated list to get multiple entities.")
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
-	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `50`; Maximum: `200`.")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
+	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '50'; Maximum: '200'.")
 	cmd.Flags().String("include", "", "Include related entities in the response. Use a comma-separated list to specify multiple entities.")
 	cmd.Flags().String("code", "", "Return entities that match the discount code. Use a comma-separated list to specify multiple discount codes.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[ASC]`.\n\nValid fields for ordering: `created_at` and `id`.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[ASC]'.\n\nValid fields for ordering: 'created_at' and 'id'.")
 	cmd.Flags().String("status", "", "Return entities that match the specified status. Use a comma-separated list to specify multiple status values.")
 	cmd.Flags().String("mode", "", "Return entities that match the specified mode.")
 	cmd.Flags().String("discount-group-id", "", "Return entities related to the specified discount group. Use a comma-separated list to specify multiple discount group IDs.")

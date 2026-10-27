@@ -67,7 +67,7 @@ func newMetricsListExploreEntitiesCmd(c *client.Client, opts *output.Options) *c
 		},
 	}
 
-	cmd.Flags().String("entity", "", "Return the metric that matches the specified entity name. Omit to return all metrics that are available. An unknown value, including `subscriptions` in sandbox, returns `unknown_entity`.")
+	cmd.Flags().String("entity", "", "Return the metric that matches the specified entity name. Omit to return all metrics that are available. An unknown value, including 'subscriptions' in sandbox, returns 'unknown_entity'.")
 
 	return cmd
 }
@@ -114,8 +114,8 @@ func newMetricsGetActiveSubscribersCmd(c *client.Client, opts *output.Options) *
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -162,8 +162,8 @@ func newMetricsGetChargebacksCmd(c *client.Client, opts *output.Options) *cobra.
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -210,8 +210,8 @@ func newMetricsGetCheckoutConversionCmd(c *client.Client, opts *output.Options) 
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -258,8 +258,8 @@ func newMetricsGetMonthlyRecurringRevenueCmd(c *client.Client, opts *output.Opti
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -306,8 +306,8 @@ func newMetricsGetMonthlyRecurringRevenueChangeCmd(c *client.Client, opts *outpu
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -354,8 +354,8 @@ func newMetricsGetRefundsCmd(c *client.Client, opts *output.Options) *cobra.Comm
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -402,8 +402,8 @@ func newMetricsGetRevenueCmd(c *client.Client, opts *output.Options) *cobra.Comm
 		},
 	}
 
-	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as `to`.")
-	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as `from`.")
+	cmd.Flags().String("from", "", "Return data from a specific date. Pass an RFC 3339 full-date string. Interpreted at 00:00 UTC. Must be before or the same as 'to'.")
+	cmd.Flags().String("to", "", "Return data up to a specific date. Pass an RFC 3339 full-date string. Interpreted as 00:00 UTC. Must be after or the same as 'from'.")
 
 	return cmd
 }
@@ -472,7 +472,7 @@ func newMetricsRunExploreQueryCmd(c *client.Client, opts *output.Options) *cobra
 		},
 	}
 
-	cmd.Flags().String("after", "", "Pagination cursor from the previous response's `meta.pagination.next`. Omit for the first page. Send the same request body with it: a cursor that doesn't match the body you send is rejected with `invalid_cursor`.")
+	cmd.Flags().String("after", "", "Pagination cursor from the previous response's 'meta.pagination.next'. Omit for the first page. Send the same request body with it: a cursor that doesn't match the body you send is rejected with 'invalid_cursor'.")
 
 	cmd.Flags().String("json", "", "Request body as JSON: inline ('{…}'), from a file (@body.json), or from stdin (-)")
 	cmd.Flags().Bool("schema", false, "Print the request body JSON schema and exit")
