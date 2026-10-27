@@ -93,7 +93,7 @@ func newSubscriptionHistoryListCmd(c *client.Client, opts *output.Options) *cobr
 	cmd.Flags().String("actor-type", "", "Return history entries that match the specified actor type. Use a comma-separated list to specify multiple actor type values.")
 	cmd.Flags().String("actor-id", "", "Return history entries that match the specified actor ID. Use a comma-separated list to specify multiple actor ID values. Only applicable if 'actor_type' is also selected.")
 	cmd.Flags().String("reason", "", "Return history entries that match the specified reason. Use a comma-separated list to specify multiple reason values.")
-	cmd.Flags().String("occurred-at", "", "Return entities that occurred at a specific time. Use '[LTE]' (less than or equal to) or '[GTE]' (greater than or equal to) operators with an RFC 3339 datetime string. For example, 'occurred_at[LTE]=2023-04-18T17:03:26Z' or 'occurred_at[GTE]=2023-04-18T17:03:26Z'.")
+	cmd.Flags().String("occurred-at", "", "Return entities that occurred at a specific time. Use '[LTE]' (less than or equal to) or '[GTE]' (greater than or equal to) operators with an RFC 3339 datetime string. For example, 'occurred_at[LTE]=2023-04-18T17:03:26Z' or 'occurred_at[GTE]=2023-04-18T17:03:26Z'. Use --occurred-at-lte or --occurred-at-gte to filter by range.")
 	cmd.Flags().String("occurred-at-lte", "", "Return entities with occurred_at at or before this value.")
 	cmd.Flags().String("occurred-at-gte", "", "Return entities with occurred_at at or after this value.")
 	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
