@@ -244,6 +244,10 @@ func (r *Root) resolveAccessToken(cmd *cobra.Command, cfg, resolved *config.Conf
 func resolveHeaders(cmd *cobra.Command) (map[string]string, error) {
 	headers := make(map[string]string)
 	headerFlags, _ := cmd.Flags().GetStringArray("header")
+	// pflag reads a lone --header "" back as no entries at all.
+	if cmd.Flags().Changed("header") && len(headerFlags) == 0 {
+		headerFlags = []string{""}
+	}
 	for i, h := range headerFlags {
 		k, v, ok := parseHeader(h)
 		if !ok {
@@ -260,7 +264,7 @@ func resolveHeaders(cmd *cobra.Command) (map[string]string, error) {
 		n++
 		k, v, ok := parseHeader(h)
 		if !ok {
-			return nil, fmt.Errorf("%w: PADDLE_HEADER entry #%d isn't in 'Key: Value' form", ErrUsage, n)
+			return nil, fmt.Errorf("%w: PADDLE_HEADER entry #%d isn't in 'Key: Value' form (entries are separated by commas)", ErrUsage, n)
 		}
 		headers[k] = v
 	}
@@ -375,9 +379,24 @@ func detectColorAuto() bool {
 	return output.IsStdoutTTY()
 }
 
-// parseHeader splits "Key: Value", reporting false when there's no colon or no key.
+// parseHeader splits "Key: Value", reporting false for anything net/http would
+// reject later with the header's text in its error.
 func parseHeader(h string) (key, value string, ok bool) {
 	k, v, found := strings.Cut(h, ":")
-	k = strings.TrimSpace(k)
-	return k, strings.TrimSpace(v), found && k != ""
+	k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+	return k, v, found && isHeaderName(k) && !strings.ContainsAny(v, "\r\n\x00")
+}
+
+// isHeaderName reports whether s is an RFC 9110 token.
+func isHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("!#$%&'*+-.^_`|~", c) &&
+			(c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
+		}
+	}
+	return true
 }

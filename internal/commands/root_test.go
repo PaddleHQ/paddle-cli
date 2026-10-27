@@ -655,14 +655,17 @@ func TestRootCommand_PersistentFlagUsageHasNoEmbeddedBackticks(t *testing.T) {
 // A header can carry a credential, so a malformed one fails without echoing it.
 func TestRootSetup_RejectsMalformedHeaders(t *testing.T) {
 	cases := []struct {
-		name   string
-		header string
-		env    string
-		want   string
+		name    string
+		headers []string
+		env     string
+		want    string
 	}{
-		{"no colon", "Authorization Bearer secret", "", "--header #1"},
-		{"empty name", ": secret", "", "--header #1"},
-		{"bad env entry", "", "X-Ok: 1,secret", "PADDLE_HEADER entry #2"},
+		{"no colon", []string{"Authorization Bearer secret"}, "", "--header #1"},
+		{"empty name", []string{": secret"}, "", "--header #1"},
+		{"space in name", []string{"Authorization Bearer secret: x"}, "", "--header #1"},
+		{"newline in value", []string{"X-Ok: 1", "X-Foo: a\r\nX-Secret: b"}, "", "--header #2"},
+		{"empty flag", []string{""}, "", "--header #1"},
+		{"bad env entry", nil, "X-Ok: 1,secret", "PADDLE_HEADER entry #2"},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -678,8 +681,8 @@ func TestRootSetup_RejectsMalformedHeaders(t *testing.T) {
 			root.Cmd.SetOut(&bytes.Buffer{})
 			root.Cmd.SetErr(&bytes.Buffer{})
 			args := []string{"api", "/event-types"}
-			if tc.header != "" {
-				args = append(args, "--header", tc.header)
+			for _, h := range tc.headers {
+				args = append(args, "--header", h)
 			}
 			root.Cmd.SetArgs(args)
 
@@ -690,7 +693,7 @@ func TestRootSetup_RejectsMalformedHeaders(t *testing.T) {
 			if !strings.Contains(err.Error(), tc.want) {
 				t.Errorf("error %q should name %s", err, tc.want)
 			}
-			if strings.Contains(err.Error(), "secret") {
+			if strings.Contains(strings.ToLower(err.Error()), "secret") {
 				t.Errorf("error %q echoes the header's contents", err)
 			}
 			if hit {
