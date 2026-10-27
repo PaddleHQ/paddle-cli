@@ -2,6 +2,7 @@ package commands_test
 
 import (
 	"bytes"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -649,4 +650,85 @@ func TestRootCommand_PersistentFlagUsageHasNoEmbeddedBackticks(t *testing.T) {
 			t.Errorf("flag %q usage contains a backtick, which pflag misinterprets as a value-placeholder delimiter: %q", f.Name, f.Usage)
 		}
 	})
+}
+
+// A header can carry a credential, so a malformed one fails without echoing it.
+func TestRootSetup_RejectsMalformedHeaders(t *testing.T) {
+	cases := []struct {
+		name    string
+		headers []string
+		env     string
+		want    string
+	}{
+		{"no colon", []string{"Authorization Bearer secret"}, "", "--header #1"},
+		{"empty name", []string{": secret"}, "", "--header #1"},
+		{"space in name", []string{"Authorization Bearer secret: x"}, "", "--header #1"},
+		{"newline in value", []string{"X-Ok: 1", "X-Foo: a\r\nX-Secret: b"}, "", "--header #2"},
+		{"empty flag", []string{""}, "", "--header #1"},
+		{"bad env entry", nil, "X-Ok: 1,secret", "PADDLE_HEADER entry #2"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			hit := false
+			server := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) { hit = true }))
+			defer server.Close()
+			t.Setenv("PADDLE_API_URL", server.URL)
+			t.Setenv("PADDLE_API_KEY", "key_test")
+			t.Setenv("PADDLE_HEADER", tc.env)
+
+			root := commands.NewRoot(commands.RootConfig{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")})
+			root.Cmd.AddCommand(commands.NewAPICmd(root))
+			root.Cmd.SetOut(&bytes.Buffer{})
+			root.Cmd.SetErr(&bytes.Buffer{})
+			args := []string{"api", "/event-types"}
+			for _, h := range tc.headers {
+				args = append(args, "--header", h)
+			}
+			root.Cmd.SetArgs(args)
+
+			err := root.Cmd.Execute()
+			if !errors.Is(err, commands.ErrUsage) {
+				t.Fatalf("expected a usage error, got %v", err)
+			}
+			if !strings.Contains(err.Error(), tc.want) {
+				t.Errorf("error %q should name %s", err, tc.want)
+			}
+			if strings.Contains(strings.ToLower(err.Error()), "secret") {
+				t.Errorf("error %q echoes the header's contents", err)
+			}
+			if hit {
+				t.Error("request was sent despite the malformed header")
+			}
+		})
+	}
+}
+
+func TestRootSetup_SendsWellFormedHeaders(t *testing.T) {
+	var got http.Header
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		got = r.Header.Clone()
+		w.Header().Set("Content-Type", "application/json")
+		if _, err := w.Write([]byte(`{"data":[]}`)); err != nil {
+			t.Error(err)
+		}
+	}))
+	defer server.Close()
+	t.Setenv("PADDLE_API_URL", server.URL)
+	t.Setenv("PADDLE_API_KEY", "key_test")
+	t.Setenv("PADDLE_HEADER", "X-Env: 2,") // a trailing comma isn't an entry
+
+	root := commands.NewRoot(commands.RootConfig{ConfigPath: filepath.Join(t.TempDir(), "config.yaml")})
+	root.Cmd.AddCommand(commands.NewAPICmd(root))
+	root.Cmd.SetOut(&bytes.Buffer{})
+	root.Cmd.SetErr(&bytes.Buffer{})
+	root.Cmd.SetArgs([]string{"api", "/event-types", "--header", "X-Flag: a:b"})
+	if err := root.Cmd.Execute(); err != nil {
+		t.Fatalf("execute: %v", err)
+	}
+	if v := got.Get("X-Flag"); v != "a:b" {
+		t.Errorf("X-Flag = %q, want %q", v, "a:b")
+	}
+	if v := got.Get("X-Env"); v != "2" {
+		t.Errorf("X-Env = %q, want %q", v, "2")
+	}
 }
