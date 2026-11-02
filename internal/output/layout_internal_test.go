@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func render(t *testing.T, format Format, input string, opts Options) string {
@@ -297,7 +298,7 @@ func TestFieldCell(t *testing.T) {
 	})
 
 	t.Run("a spaceless value up to 256 characters stays whole", func(t *testing.T) {
-		long := "https://example.com/" + strings.Repeat("a", 200)
+		long := strings.Repeat("a", 250)
 		if got := fieldCell(long, Options{}); got != long {
 			t.Errorf("expected the %d-char value whole, got:\n%s", len(long), got)
 		}
@@ -353,4 +354,40 @@ func TestFieldCell(t *testing.T) {
 			t.Errorf("got %q", got)
 		}
 	})
+}
+
+// A preview has no id, but it's still one object: its other fields aren't
+// plain values, and its items share names like status with it.
+func TestPrint_PreviewWithItemsStaysOneObject(t *testing.T) {
+	input := `{"data":{"status":"active","customer_id":"ctm_01","billing_cycle":{"interval":"month","frequency":1},
+		"items":[{"status":"active","quantity":1},{"status":"active","quantity":5}],"consent_requirements":[]}}`
+	if got := render(t, FormatCSV, input, Options{}); !strings.HasPrefix(got, "STATUS,CUSTOMER_ID,BILLING_CYCLE,ITEMS,CONSENT_REQUIREMENTS\n") || strings.Count(got, "\n") != 2 {
+		t.Errorf("CSV should be the preview's own columns, one row; got:\n%s", got)
+	}
+
+	// Even with only plain values beside the array, rows can't reuse their names.
+	clash := `{"data":{"status":"draft","lines":[{"status":"active","quantity":1}]}}`
+	if got := render(t, FormatCSV, clash, Options{}); !strings.HasPrefix(got, "STATUS,LINES\n") {
+		t.Errorf("a name shared by the object and its rows should keep it one object; got:\n%s", got)
+	}
+}
+
+// A single payment method, reached through the payment_methods field, is
+// still a map of one row.
+func TestPrint_WrappedMapOfOneEntryBecomesRows(t *testing.T) {
+	input := `{"data":{"payment_methods":{"card":{"available":true,"enabled":true}}}}`
+	if got, want := render(t, FormatCSV, input, Options{}), "KEY,AVAILABLE,ENABLED\ncard,true,true\n"; got != want {
+		t.Errorf("CSV:\ngot  %q\nwant %q", got, want)
+	}
+}
+
+func TestTableCell_CutsByCharacter(t *testing.T) {
+	long := strings.Repeat("é", 70)
+	got := tableCell(long, Options{})
+	if !utf8.ValidString(got) || got != strings.Repeat("é", 61)+"..." {
+		t.Errorf("expected 61 whole characters and ..., got %q", got)
+	}
+	if short := strings.Repeat("é", 40); tableCell(short, Options{}) != short {
+		t.Error("40 two-byte characters fit in 64 characters, so nothing should be cut")
+	}
 }

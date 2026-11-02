@@ -187,14 +187,16 @@ func objectLayout(o *object, columns []ColumnDef) layout {
 func mapRows(o *object) ([]*object, []string, bool) {
 	if len(o.keys) == 1 {
 		if inner, ok := o.vals[o.keys[0]].(*object); ok {
-			return sameShapeRows(inner)
+			return sameShapeRows(inner, 1)
 		}
 	}
-	return sameShapeRows(o)
+	return sameShapeRows(o, 2)
 }
 
-func sameShapeRows(o *object) ([]*object, []string, bool) {
-	if len(o.keys) < 2 {
+// sameShapeRows needs at least minEntries keys: a lone top-level object field
+// looks like any single object, but one wrapped in a field is still a map.
+func sameShapeRows(o *object, minEntries int) ([]*object, []string, bool) {
+	if len(o.keys) < minEntries {
 		return nil, nil, false
 	}
 	shape := []string(nil)
@@ -228,28 +230,44 @@ func sameKeys(a, b []string) bool {
 	return true
 }
 
-// soleArrayOfObjects finds the one field holding a non-empty array of objects,
-// such as a metric's timeseries, which is the content worth tabulating. An
-// entity (it has an id) is the content itself, so its lists stay fields.
+// soleArrayOfObjects finds the array of objects that is an object's content,
+// such as a metric's timeseries: every other field is a plain value and the
+// rows reuse none of their names. Entities (they have an id) and objects with
+// more structure, like previews, stay one object.
 func soleArrayOfObjects(o *object) (string, []*object, bool) {
 	if _, entity := o.vals["id"]; entity {
 		return "", nil, false
 	}
-	field, items := "", []any(nil)
-	for _, k := range o.keys {
-		if arr, ok := o.vals[k].([]any); ok && len(arr) > 0 {
-			if _, isObj := arr[0].(*object); isObj {
-				if field != "" {
-					return "", nil, false
-				}
-				field, items = k, arr
-			}
-		}
-	}
-	if field == "" {
+	field, items, ok := onlyArrayField(o)
+	if !ok {
 		return "", nil, false
 	}
-	return field, objectsIn(items), true
+	rows := objectsIn(items)
+	if len(rows) == 0 || len(rows) != len(items) || reusesNames(o, rows) {
+		return "", nil, false
+	}
+	return field, rows, true
+}
+
+// onlyArrayField finds the object's one array when every other field is a
+// plain value.
+func onlyArrayField(o *object) (field string, items []any, ok bool) {
+	for _, k := range o.keys {
+		arr, isArr := o.vals[k].([]any)
+		if _, isObj := o.vals[k].(*object); isObj || (isArr && field != "") {
+			return "", nil, false
+		}
+		if isArr {
+			field, items = k, arr
+		}
+	}
+	return field, items, field != ""
+}
+
+func reusesNames(o *object, rows []*object) bool {
+	return slices.ContainsFunc(rows, func(r *object) bool {
+		return slices.ContainsFunc(r.keys, func(k string) bool { _, clash := o.vals[k]; return clash })
+	})
 }
 
 func objectsIn(items []any) []*object {
@@ -314,13 +332,14 @@ func tableCell(v any, opts Options) string {
 		return ts
 	}
 	s := csvCell(v)
-	if opts.NoTrunc || len(s) <= 64 {
+	r := []rune(s)
+	if opts.NoTrunc || len(r) <= 64 {
 		return s
 	}
 	if opts.Truncated != nil {
 		*opts.Truncated = true
 	}
-	return s[:61] + "..."
+	return string(r[:61]) + "..."
 }
 
 func shortTimestamp(v any) (string, bool) {
