@@ -71,8 +71,8 @@ func NewWhoamiCmd(root *Root) *cobra.Command {
 }
 
 // printWhoami renders a curated table view of the `GET /` response.
-// Default: one row with environment, account, auth type, and permission count.
-// With full=true: summary row (no permissions) followed by a permission-per-row table.
+// Default: environment, account, auth type and permission count, one field per line.
+// With full=true: those fields (no permission count) followed by a permission-per-row table.
 func printWhoami(body []byte, full bool, opts output.Options) error {
 	var apiResp whoamiAPIResponse
 	if err := json.Unmarshal(body, &apiResp); err != nil {

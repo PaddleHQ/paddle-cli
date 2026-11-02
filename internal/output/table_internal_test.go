@@ -282,10 +282,9 @@ func TestPrintTable_SingleObject(t *testing.T) {
 	}
 }
 
-// TestPrintTable_HidesAllEmptyColumns verifies that columns where every
-// value is empty/null/missing/empty-container are dropped before
-// rendering. Covers "" / null / [] / {} cell renderings. Columns with
-// even a single non-empty value must remain.
+// TestPrintTable_HidesAllEmptyColumns verifies that a list's columns where
+// every value is empty/null/missing/empty-container are dropped before
+// rendering. Columns with even a single non-empty value must remain.
 func TestPrintTable_HidesAllEmptyColumns(t *testing.T) {
 	input := []byte(`{"data":[
 		{"id":"ctm_1","email":"a@x","website":"","custom_data":null,"tags":[],"meta":{}},
@@ -336,9 +335,9 @@ func TestPrintTable_KeepsBooleanAndZeroColumns(t *testing.T) {
 // the current append-to-kept pattern. Uses the helper directly to
 // avoid rendering-dependent string assertions.
 func TestDropEmptyColumns_PreservesOrderWhenMiddleDropped(t *testing.T) {
-	rows := []map[string]any{
-		{"a": "a1", "b": "", "c": "c1"},
-		{"a": "a2", "b": "", "c": "c2"},
+	rows := []*object{
+		{keys: []string{"a", "b", "c"}, vals: map[string]any{"a": "a1", "b": "", "c": "c1"}},
+		{keys: []string{"a", "b", "c"}, vals: map[string]any{"a": "a2", "b": "", "c": "c2"}},
 	}
 	cols := []ColumnDef{
 		{Header: "A", Field: "a"},
@@ -386,6 +385,23 @@ func TestPrintTable_AllColumnsEmptyFallback(t *testing.T) {
 	out := buf.String()
 	if !strings.Contains(out, "A") || !strings.Contains(out, "B") {
 		t.Errorf("expected A and B headers in the all-empty fallback:\n%s", out)
+	}
+}
+
+// TestPrintTable_SingleObjectKeepsEmptyFields verifies that a single object
+// shows every field, empty ones included, so it matches the CSV.
+func TestPrintTable_SingleObjectKeepsEmptyFields(t *testing.T) {
+	input := []byte(`{"data":{"enabled":true,"discount":null,"tags":[],"meta":{}}}`)
+	var buf bytes.Buffer
+	opts := Options{Format: FormatTable, Writer: &buf}
+	if err := Print(input, nil, opts); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	out := buf.String()
+	for _, field := range []string{"enabled", "discount", "tags", "meta"} {
+		if !strings.Contains(out, field) {
+			t.Errorf("%s field should be shown even when empty:\n%s", field, out)
+		}
 	}
 }
 

@@ -58,7 +58,10 @@ type Options struct {
 	// JSON output and written to stderr as a pagination hint after the banner.
 	// Populated by generated list commands when the response has has_more=true.
 	NextCommand string
-	Writer      io.Writer
+	// Truncated, when set, is flipped to true by a table that cut a value
+	// short, so main can point the reader at the full data.
+	Truncated *bool
+	Writer    io.Writer
 }
 
 // DefaultOptions returns options suitable for interactive terminal use.

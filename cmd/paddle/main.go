@@ -63,4 +63,5 @@ func main() {
 
 	writeBanner()
 	output.WritePaginationHint(os.Stderr, root.OutputPtr.NextCommand)
+	output.WriteTruncationHint(os.Stderr, root.OutputPtr.Truncated, root.BannerSuppressed)
 }
