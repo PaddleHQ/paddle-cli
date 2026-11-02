@@ -118,6 +118,12 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 	nonInteractiveFlag, _ := cmd.Flags().GetBool("non-interactive")
 	r.NonInteractive = nonInteractiveFlag
 
+	return r.configureClient(cmd, cfg, resolved, cfgPath)
+}
+
+// configureClient points the API client at the resolved environment, with
+// its credential and headers.
+func (r *Root) configureClient(cmd *cobra.Command, cfg, resolved *config.Config, cfgPath string) error {
 	apiVersion := resolved.APIVersion
 	if v, _ := cmd.Flags().GetString("api-version"); v != "" {
 		apiVersion = v
@@ -126,6 +132,11 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 	apiURL := os.Getenv("PADDLE_API_URL")
 	if apiURL == "" && resolved.CurrentEnvironment != "" {
 		apiURL, _ = config.EnvironmentURL(resolved.CurrentEnvironment)
+	}
+
+	headers, err := resolveHeaders(cmd)
+	if err != nil {
+		return err
 	}
 
 	accessToken, err := r.resolveAccessToken(cmd, cfg, resolved, cfgPath)
@@ -138,7 +149,7 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 		BaseURL:     apiURL,
 		AccessToken: accessToken,
 		APIVersion:  apiVersion,
-		Headers:     resolveHeaders(cmd),
+		Headers:     headers,
 		ClientApp:   agent.Detect(),
 	})
 
@@ -229,19 +240,35 @@ func (r *Root) resolveAccessToken(cmd *cobra.Command, cfg, resolved *config.Conf
 }
 
 // resolveHeaders merges --header flags with PADDLE_HEADER, the env var winning on conflict.
-func resolveHeaders(cmd *cobra.Command) map[string]string {
+// A malformed header is a usage error, named by position since its text may be a credential.
+func resolveHeaders(cmd *cobra.Command) (map[string]string, error) {
+	headers := make(map[string]string)
 	headerFlags, _ := cmd.Flags().GetStringArray("header")
-	headers := parseHeaders(headerFlags)
-
-	if envHeaders := os.Getenv("PADDLE_HEADER"); envHeaders != "" {
-		for h := range strings.SplitSeq(envHeaders, ",") {
-			k, v, ok := strings.Cut(h, ":")
-			if ok {
-				headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
-			}
-		}
+	// pflag reads a lone --header "" back as no entries at all.
+	if cmd.Flags().Changed("header") && len(headerFlags) == 0 {
+		headerFlags = []string{""}
 	}
-	return headers
+	for i, h := range headerFlags {
+		k, v, ok := parseHeader(h)
+		if !ok {
+			return nil, fmt.Errorf("%w: --header #%d isn't in 'Key: Value' form", ErrUsage, i+1)
+		}
+		headers[k] = v
+	}
+
+	n := 0
+	for h := range strings.SplitSeq(os.Getenv("PADDLE_HEADER"), ",") {
+		if strings.TrimSpace(h) == "" {
+			continue
+		}
+		n++
+		k, v, ok := parseHeader(h)
+		if !ok {
+			return nil, fmt.Errorf("%w: PADDLE_HEADER entry #%d isn't in 'Key: Value' form (entries are separated by commas)", ErrUsage, n)
+		}
+		headers[k] = v
+	}
+	return headers, nil
 }
 
 // Client returns the API client configured during setup.
@@ -352,13 +379,24 @@ func detectColorAuto() bool {
 	return output.IsStdoutTTY()
 }
 
-func parseHeaders(headerFlags []string) map[string]string {
-	headers := make(map[string]string)
-	for _, h := range headerFlags {
-		k, v, ok := strings.Cut(h, ":")
-		if ok {
-			headers[strings.TrimSpace(k)] = strings.TrimSpace(v)
+// parseHeader splits "Key: Value", reporting false for anything net/http would
+// reject later with the header's text in its error.
+func parseHeader(h string) (key, value string, ok bool) {
+	k, v, found := strings.Cut(h, ":")
+	k, v = strings.TrimSpace(k), strings.TrimSpace(v)
+	return k, v, found && isHeaderName(k) && !strings.ContainsAny(v, "\r\n\x00")
+}
+
+// isHeaderName reports whether s is an RFC 9110 token.
+func isHeaderName(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, c := range s {
+		if !strings.ContainsRune("!#$%&'*+-.^_`|~", c) &&
+			(c < '0' || c > '9') && (c < 'a' || c > 'z') && (c < 'A' || c > 'Z') {
+			return false
 		}
 	}
-	return headers
+	return true
 }
