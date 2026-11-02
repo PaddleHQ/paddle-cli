@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 )
 
 // keyField names the column that holds each key when a map becomes rows.
@@ -305,9 +306,15 @@ func csvCell(v any) string {
 }
 
 // tableCell renders a value for a table, cutting anything longer than 64
-// characters unless opts.NoTrunc asks for everything.
+// characters unless opts.NoTrunc asks for everything. UTC timestamps drop
+// seconds; JSON and CSV keep the exact value.
 func tableCell(v any, opts Options) string {
 	s := csvCell(v)
+	if str, ok := v.(string); ok && strings.HasSuffix(str, "Z") {
+		if ts, err := time.Parse(time.RFC3339Nano, str); err == nil {
+			return ts.Format("2006-01-02 15:04")
+		}
+	}
 	if opts.NoTrunc || len(s) <= 64 {
 		return s
 	}

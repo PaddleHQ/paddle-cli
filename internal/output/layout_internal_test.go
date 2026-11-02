@@ -86,7 +86,7 @@ func TestPrint_SoleArrayOfObjectsBecomesRows(t *testing.T) {
 	if lineWith(out, "currency_code", "GBP") == "" {
 		t.Errorf("expected the other fields above the rows:\n%s", out)
 	}
-	if lineWith(out, "TIMESTAMP", "AMOUNT") == "" || lineWith(out, "2026-10-02T00:00:00Z", "0") == "" {
+	if lineWith(out, "TIMESTAMP", "AMOUNT") == "" || lineWith(out, "2026-10-02 00:00", "0") == "" {
 		t.Errorf("expected one row per array item:\n%s", out)
 	}
 }
@@ -202,5 +202,23 @@ func TestPrintTable_KeepsSmallObjectAsOneColumn(t *testing.T) {
 	out := render(t, FormatTable, input, Options{})
 	if lineWith(out, "PAYLOAD") == "" || strings.Contains(out, "PAYLOAD.EVENT_ID") {
 		t.Errorf("payload should stay one column:\n%s", out)
+	}
+}
+
+func TestTableCell_ShortensUTCTimestamps(t *testing.T) {
+	cases := map[string]string{
+		"2026-10-27T17:23:20.811Z":  "2026-10-27 17:23",
+		"2026-10-02T00:00:00Z":      "2026-10-02 00:00",
+		"2026-10-27T17:23:20+02:00": "2026-10-27T17:23:20+02:00",
+		"2026-10-27":                "2026-10-27",
+		"not a time":                "not a time",
+	}
+	for in, want := range cases {
+		if got := tableCell(in, Options{}); got != want {
+			t.Errorf("tableCell(%q) = %q, want %q", in, got, want)
+		}
+	}
+	if got := csvCell("2026-10-27T17:23:20.811Z"); got != "2026-10-27T17:23:20.811Z" {
+		t.Errorf("CSV should keep the exact timestamp, got %q", got)
 	}
 }
