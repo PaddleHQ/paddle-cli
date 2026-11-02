@@ -170,7 +170,7 @@ func renderFields(fields []fieldRow, opts Options) {
 	t.AppendHeader(table.Row{"FIELD", "VALUE"})
 	for _, f := range fields {
 		leaf := f.name[strings.LastIndex(f.name, ".")+1:]
-		t.AppendRow(table.Row{f.name, styleField(opts.Profile, leaf, tableCell(f.value, opts))})
+		t.AppendRow(table.Row{f.name, styleField(opts.Profile, leaf, fieldCell(f.value, opts))})
 	}
 	t.Render()
 }

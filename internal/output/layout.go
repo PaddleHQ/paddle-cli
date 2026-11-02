@@ -11,6 +11,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 )
 
 // keyField names the column that holds each key when a map becomes rows.
@@ -309,12 +310,10 @@ func csvCell(v any) string {
 // characters unless opts.NoTrunc asks for everything. UTC timestamps drop
 // seconds; JSON and CSV keep the exact value.
 func tableCell(v any, opts Options) string {
-	s := csvCell(v)
-	if str, ok := v.(string); ok && strings.HasSuffix(str, "Z") {
-		if ts, err := time.Parse(time.RFC3339Nano, str); err == nil {
-			return ts.Format("2006-01-02 15:04")
-		}
+	if ts, ok := shortTimestamp(v); ok {
+		return ts
 	}
+	s := csvCell(v)
 	if opts.NoTrunc || len(s) <= 64 {
 		return s
 	}
@@ -322,6 +321,118 @@ func tableCell(v any, opts Options) string {
 		*opts.Truncated = true
 	}
 	return s[:61] + "..."
+}
+
+func shortTimestamp(v any) (string, bool) {
+	str, ok := v.(string)
+	if !ok || !strings.HasSuffix(str, "Z") {
+		return "", false
+	}
+	ts, err := time.Parse(time.RFC3339Nano, str)
+	if err != nil {
+		return "", false
+	}
+	return ts.Format("2006-01-02 15:04"), true
+}
+
+// lineWidth is the width a FIELD | VALUE value wraps at, and maxLines how
+// many lines it shows before cutting.
+const (
+	lineWidth = 64
+	maxLines  = 4
+)
+
+// fieldCell renders a value for the FIELD | VALUE view, where each value can
+// take several lines. Text breaks only at spaces and JSON only after commas, so
+// URLs, IDs and JSON values stay whole and copyable; both stop after four lines.
+func fieldCell(v any, opts Options) string {
+	if ts, ok := shortTimestamp(v); ok {
+		return ts
+	}
+	if opts.NoTrunc {
+		return csvCell(v)
+	}
+	var lines []string
+	if s, ok := scalarText(v); ok {
+		for p := range strings.SplitSeq(s, "\n") {
+			pieces, cut := capPieces(strings.Fields(p), opts)
+			lines = append(lines, packLines(pieces, " ", lineWidth)...)
+			if cut {
+				break
+			}
+		}
+	} else {
+		pieces, _ := capPieces(jsonPieces(csvCell(v)), opts)
+		lines = packLines(pieces, "", lineWidth)
+	}
+	if len(lines) > maxLines {
+		if opts.Truncated != nil {
+			*opts.Truncated = true
+		}
+		lines = lines[:maxLines]
+		lines[maxLines-1] += "..."
+	}
+	return strings.Join(lines, "\n")
+}
+
+// jsonPieces splits compact JSON after each comma between values, never after
+// one inside a string, so a line break can't land inside a value.
+func jsonPieces(j string) []string {
+	var pieces []string
+	start, inString, escaped := 0, false, false
+	for i, r := range j {
+		switch {
+		case escaped:
+			escaped = false
+		case r == '\\' && inString:
+			escaped = true
+		case r == '"':
+			inString = !inString
+		case r == ',' && !inString:
+			pieces = append(pieces, j[start:i+1])
+			start = i + 1
+		}
+	}
+	return append(pieces, j[start:])
+}
+
+// capPieces cuts the first unbreakable piece longer than a whole value's worth
+// of lines, and ends the value there, so a spaceless blob can't widen the table
+// without limit. URLs are never cut, however long, so they stay copyable.
+func capPieces(pieces []string, opts Options) ([]string, bool) {
+	limit := lineWidth * maxLines
+	for i, p := range pieces {
+		if strings.Contains(p, "http://") || strings.Contains(p, "https://") {
+			continue
+		}
+		if r := []rune(p); len(r) > limit {
+			if opts.Truncated != nil {
+				*opts.Truncated = true
+			}
+			pieces[i] = string(r[:limit-3]) + "..."
+			return pieces[:i+1], true
+		}
+	}
+	return pieces, false
+}
+
+// packLines joins pieces into lines of at most width; a piece longer than
+// width gets a line of its own rather than being split.
+func packLines(pieces []string, sep string, width int) []string {
+	var lines []string
+	line := ""
+	for _, p := range pieces {
+		switch {
+		case line == "":
+			line = p
+		case utf8.RuneCountInString(line+sep+p) <= width:
+			line += sep + p
+		default:
+			lines = append(lines, line)
+			line = p
+		}
+	}
+	return append(lines, line)
 }
 
 // fieldRow is one FIELD | VALUE line of a vertical table.

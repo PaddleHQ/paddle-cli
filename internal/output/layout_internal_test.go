@@ -222,3 +222,135 @@ func TestTableCell_ShortensUTCTimestamps(t *testing.T) {
 		t.Errorf("CSV should keep the exact timestamp, got %q", got)
 	}
 }
+
+func TestFieldCell(t *testing.T) {
+	prose := "Monthly subscription to the Pro plan, billed in arrears with a fourteen-day trial before the first charge."
+	url := "https://example.com/checkout?_ptxn=txn_01m5wh4kjcrnzjs7e8zj8s5jn2&utm_source=newsletter&utm_campaign=autumn"
+	jsonOf := func(n int) []any {
+		items := make([]any, n)
+		for i := range items {
+			items[i] = &object{keys: []string{"price_id", "quantity"}, vals: map[string]any{"price_id": "pri_0000000000000000000000000" + string(rune('a'+i)), "quantity": "1"}}
+		}
+		return items
+	}
+
+	t.Run("prose wraps at spaces without cutting", func(t *testing.T) {
+		var truncated bool
+		got := fieldCell(prose, Options{Truncated: &truncated})
+		if strings.ReplaceAll(got, "\n", " ") != prose || truncated {
+			t.Errorf("expected every word, only line breaks added:\n%s", got)
+		}
+		for line := range strings.SplitSeq(got, "\n") {
+			if len(line) > 64 {
+				t.Errorf("line longer than 64: %q", line)
+			}
+		}
+	})
+
+	t.Run("text past four lines is cut", func(t *testing.T) {
+		var truncated bool
+		long := strings.Repeat(prose+" ", 4)
+		got := fieldCell(long, Options{Truncated: &truncated})
+		lines := strings.Split(got, "\n")
+		if len(lines) != 4 || !strings.HasSuffix(got, "...") || !truncated {
+			t.Errorf("expected four lines ending in ... and Truncated set:\n%s", got)
+		}
+		if !strings.HasPrefix(long, strings.TrimSuffix(strings.ReplaceAll(got, "\n", " "), "...")) {
+			t.Errorf("the lines shown should be the start of the text, words whole:\n%s", got)
+		}
+	})
+
+	t.Run("a long URL stays on one line", func(t *testing.T) {
+		got := fieldCell("Pay here: "+url, Options{})
+		if !strings.Contains(got, "\n"+url) || strings.Contains(got, "...") {
+			t.Errorf("the URL should be whole on its own line:\n%s", got)
+		}
+	})
+
+	t.Run("JSON breaks only after commas", func(t *testing.T) {
+		v := []any{"address.read", "business.read", "customer.read", "subscription.read", "transaction.read", "verification.read"}
+		got := fieldCell(v, Options{})
+		if strings.ReplaceAll(got, "\n", "") != csvCell(v) || !strings.Contains(got, "\n") {
+			t.Errorf("expected the full JSON over more than one line:\n%s", got)
+		}
+		for line := range strings.SplitSeq(got, "\n") {
+			if len(line) > 64 {
+				t.Errorf("line longer than 64: %q", line)
+			}
+			if !strings.HasSuffix(line, ",") && !strings.HasSuffix(line, "]") {
+				t.Errorf("line should end after a comma or at the end, not mid-value: %q", line)
+			}
+		}
+	})
+
+	t.Run("a comma inside a JSON string isn't a break point", func(t *testing.T) {
+		v := []any{&object{keys: []string{"id", "description"}, vals: map[string]any{
+			"id": "sim_01", "description": "Sends address events to our CRM, then waits for a reply, then retries",
+		}}}
+		got := fieldCell(v, Options{})
+		if strings.Contains(got, "CRM,\n") || strings.Contains(got, "reply,\n") {
+			t.Errorf("broke inside a string value:\n%s", got)
+		}
+		if strings.ReplaceAll(got, "\n", "") != csvCell(v) {
+			t.Errorf("expected the full JSON:\n%s", got)
+		}
+	})
+
+	t.Run("a spaceless value up to 256 characters stays whole", func(t *testing.T) {
+		long := "https://example.com/" + strings.Repeat("a", 200)
+		if got := fieldCell(long, Options{}); got != long {
+			t.Errorf("expected the %d-char value whole, got:\n%s", len(long), got)
+		}
+	})
+
+	t.Run("a URL is never cut, however long", func(t *testing.T) {
+		signed := "https://example.com/doc.pdf?X-Amz-Signature=" + strings.Repeat("a", 1600)
+		if got := fieldCell(signed, Options{}); got != signed {
+			t.Errorf("expected the %d-char URL whole, got %d chars", len(signed), len(got))
+		}
+		v := []any{&object{keys: []string{"url"}, vals: map[string]any{"url": signed}}}
+		if got := fieldCell(v, Options{}); !strings.Contains(got, signed) {
+			t.Errorf("expected the URL whole inside JSON too, got %d chars", len(got))
+		}
+	})
+
+	t.Run("a spaceless value past 256 characters is cut", func(t *testing.T) {
+		var truncated bool
+		blob := strings.Repeat("x", 300)
+		got := fieldCell(blob, Options{Truncated: &truncated})
+		if got != blob[:253]+"..." || !truncated {
+			t.Errorf("expected 253 chars and ..., with Truncated set; got %d chars: %q", len(got), got)
+		}
+	})
+
+	t.Run("the value ends where a long piece is cut", func(t *testing.T) {
+		for _, in := range []string{"start " + strings.Repeat("x", 300) + " tail", "start " + strings.Repeat("x", 300) + "\nnext paragraph"} {
+			got := fieldCell(in, Options{})
+			if !strings.HasSuffix(got, "...") || strings.Contains(got, "tail") || strings.Contains(got, "next") {
+				t.Errorf("nothing should follow the cut:\n%s", got)
+			}
+		}
+	})
+
+	t.Run("JSON past four lines is cut", func(t *testing.T) {
+		var truncated bool
+		got := fieldCell(jsonOf(8), Options{Truncated: &truncated})
+		lines := strings.Split(got, "\n")
+		if len(lines) != 4 || !strings.HasSuffix(got, "...") || !truncated {
+			t.Errorf("expected four lines ending in ... and Truncated set:\n%s", got)
+		}
+	})
+
+	t.Run("timestamps still shorten", func(t *testing.T) {
+		if got := fieldCell("2026-10-27T17:23:20.811Z", Options{}); got != "2026-10-27 17:23" {
+			t.Errorf("got %q", got)
+		}
+	})
+
+	t.Run("NoTrunc shows everything on one line", func(t *testing.T) {
+		v := jsonOf(8)
+		if got := fieldCell(v, Options{NoTrunc: true}); got != csvCell(v) {
+			t.Errorf("got %q", got)
+		}
+	})
+}
