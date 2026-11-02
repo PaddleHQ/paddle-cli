@@ -29,8 +29,9 @@ func NewAPICmd(root *Root) *cobra.Command {
 		Long: "Make a raw API request to any Paddle endpoint. Uses current environment auth and base URL. " +
 			"The path may include an embedded query string (e.g. /customers?status=active) which is merged with --query flags; " +
 			"on conflict, --query wins.",
-		GroupID: GroupIDOther,
-		Args:    cobra.ExactArgs(1),
+		GroupID:     GroupIDOther,
+		Annotations: callsAPIAnnotations(AnnotationNoAuth),
+		Args:        cobra.ExactArgs(1),
 		RunE: func(cmd *cobra.Command, args []string) error {
 			return runAPI(cmd, root, args[0])
 		},

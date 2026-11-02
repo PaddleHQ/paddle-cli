@@ -21,9 +21,10 @@ func NewCountriesCmd(c *client.Client, opts *output.Options) *cobra.Command {
 
 func newCountriesListCmd(c *client.Client, opts *output.Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List Paddle countries",
-		Args:  cobra.NoArgs,
+		Use:         "list",
+		Short:       "List Paddle countries",
+		Annotations: map[string]string{"paddle_no_auth": "true"},
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/countries"
 

@@ -21,9 +21,10 @@ func NewCurrenciesCmd(c *client.Client, opts *output.Options) *cobra.Command {
 
 func newCurrenciesListCmd(c *client.Client, opts *output.Options) *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "list",
-		Short: "List Paddle currencies",
-		Args:  cobra.NoArgs,
+		Use:         "list",
+		Short:       "List Paddle currencies",
+		Annotations: map[string]string{"paddle_no_auth": "true"},
+		Args:        cobra.NoArgs,
 		RunE: func(cmd *cobra.Command, args []string) error {
 			path := "/currencies"
 

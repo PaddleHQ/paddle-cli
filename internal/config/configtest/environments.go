@@ -12,22 +12,29 @@ const (
 	TestEnv = "test_env"
 	// TestEnvAPIKeyOnly has no OAuth client, so only API keys work.
 	TestEnvAPIKeyOnly = "test_env_apikey_only" //nolint:gosec // environment name, not a credential
+
+	// TestEnvKeyPrefix starts the API keys TestEnv issues.
+	TestEnvKeyPrefix = "test_live_apikey_"
+	// TestEnvAPIKeyOnlyKeyPrefix starts the API keys TestEnvAPIKeyOnly issues.
+	TestEnvAPIKeyOnlyKeyPrefix = "test_sdbx_apikey_" //nolint:gosec // key prefix, not a credential
 )
 
 // Environments returns a fresh set of dummy environments.
 func Environments() map[string]config.Environment {
 	return map[string]config.Environment{
 		TestEnv: {
-			BaseURL:    "https://api.example.test",
-			AuthDomain: "auth.example.test",
-			ClientID:   "client_test",
-			Scopes:     []string{"openid", "offline_access"},
-			Color:      termenv.ANSIBrightRed,
-			Bold:       true,
+			BaseURL:      "https://api.example.test",
+			AuthDomain:   "auth.example.test",
+			ClientID:     "client_test",
+			Scopes:       []string{"openid", "offline_access"},
+			Color:        termenv.ANSIBrightRed,
+			Bold:         true,
+			APIKeyPrefix: TestEnvKeyPrefix,
 		},
 		TestEnvAPIKeyOnly: {
-			BaseURL: "https://apikey-only.example.test",
-			Color:   termenv.ANSIYellow,
+			BaseURL:      "https://apikey-only.example.test",
+			Color:        termenv.ANSIYellow,
+			APIKeyPrefix: TestEnvAPIKeyOnlyKeyPrefix,
 		},
 	}
 }

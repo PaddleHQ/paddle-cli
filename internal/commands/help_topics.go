@@ -133,12 +133,13 @@ func exitCodesTopic() string {
 	return `Exit Codes: Paddle CLI exit code reference
 
   0   Success
-  1   General error (unexpected error, request failed, auth missing)
+  1   General error (unexpected error, request failed)
   2   Usage error (unknown flag, unknown subcommand, missing required argument,
       destructive op without --confirm in non-interactive context)
   3   Not found (API returned 404)
-  4   Authentication error (401: missing or invalid credentials)
-  5   Authorisation error (403: authenticated but not permitted)
+  4   Authentication error (not logged in, an API key for a different
+      environment, or a missing, malformed or invalid key)
+  5   Authorisation error (authenticated but not permitted)
   6   Rate limit (429: too many requests)
   7   Validation error (422: request body failed validation)
   8   Conflict (409: conflicting state, e.g. duplicate)

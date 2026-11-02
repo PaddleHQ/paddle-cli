@@ -2,11 +2,13 @@ package commands_test
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"testing"
 
+	"github.com/PaddleHQ/paddle-cli/internal/client"
 	"github.com/PaddleHQ/paddle-cli/internal/commands"
 	"github.com/PaddleHQ/paddle-cli/internal/config"
 	"github.com/PaddleHQ/paddle-cli/internal/config/configtest"
@@ -207,8 +209,8 @@ func TestWhoamiCmd_Unauthenticated(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error when unauthenticated")
 	}
-	if !bytes.Contains([]byte(err.Error()), []byte("not authenticated")) {
-		t.Errorf("expected 'not authenticated' in error, got: %v", err)
+	if !errors.Is(err, client.ErrNotAuthenticated) {
+		t.Errorf("expected ErrNotAuthenticated, got: %v", err)
 	}
 }
 
