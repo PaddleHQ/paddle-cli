@@ -74,9 +74,9 @@ func newEventsListCmd(c *client.Client, opts *output.Options) *cobra.Command {
 		},
 	}
 
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
-	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `50`; Maximum: `200`.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[ASC]`.\n\nValid fields for ordering: `id` (for `event_id`).")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
+	cmd.Flags().Int("per-page", 50, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '50'; Maximum: '200'.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[ASC]'.\n\nValid fields for ordering: 'id' (for 'event_id').")
 	cmd.Flags().String("event-type", "", "Return events that match the specified event type. Use a comma-separated list to specify multiple event types.")
 	cmd.Flags().String("filter", "", "Return entities that contain the value specified. Pass a Paddle ID or email address that appears in the event payload, or part of one. Complete Paddle IDs and email addresses match exactly; partial values match as a prefix or substring, and must be at least three characters.")
 	cmd.Flags().String("to", "", "Return entities up to a specific time. Pass an RFC 3339 datetime string.")

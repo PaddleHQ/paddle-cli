@@ -87,11 +87,11 @@ func newAdjustmentsListCmd(c *client.Client, opts *output.Options) *cobra.Comman
 	}
 
 	cmd.Flags().String("id", "", "Return only the IDs specified. Use a comma-separated list to get multiple entities.")
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
 	cmd.Flags().String("action", "", "Return entities for the specified action. Use a comma-separated list to specify multiple action values.")
 	cmd.Flags().String("customer-id", "", "Return entities related to the specified customer. Use a comma-separated list to specify multiple customer IDs.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[ASC]`.\n\nValid fields for ordering: `id`.")
-	cmd.Flags().Int("per-page", 10, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `10`; Maximum: `50`.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[ASC]'.\n\nValid fields for ordering: 'id'.")
+	cmd.Flags().Int("per-page", 10, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '10'; Maximum: '50'.")
 	cmd.Flags().String("status", "", "Return entities that match the specified status. Use a comma-separated list to specify multiple status values.")
 	cmd.Flags().String("subscription-id", "", "Return entities related to the specified subscription. Use a comma-separated list to specify multiple subscription IDs.")
 	cmd.Flags().String("transaction-id", "", "Return entities related to the specified transaction. Use a comma-separated list to specify multiple transaction IDs.")
@@ -208,7 +208,7 @@ func newAdjustmentsGetCreditNoteCmd(c *client.Client, opts *output.Options) *cob
 		},
 	}
 
-	cmd.Flags().String("disposition", "", "Determine whether the generated URL should download the PDF as an attachment saved locally, or open it inline in the browser.\n\nDefault: `attachment`.")
+	cmd.Flags().String("disposition", "", "Determine whether the generated URL should download the PDF as an attachment saved locally, or open it inline in the browser.\n\nDefault: 'attachment'.")
 
 	return cmd
 }

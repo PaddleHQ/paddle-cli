@@ -77,10 +77,10 @@ func newNotificationSettingsListCmd(c *client.Client, opts *output.Options) *cob
 		},
 	}
 
-	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the `meta.pagination.next` URL in responses for list operations.")
-	cmd.Flags().Int("per-page", 200, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check `meta.pagination.per_page` in the response to see how many were returned.\n\nDefault: `200`; Maximum: `200`.")
-	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction (`[ASC]` or `[DESC]`). For example, `?order_by=id[ASC]`.\n\nValid fields for ordering: `id`.")
-	cmd.Flags().Bool("active", false, "Determine whether returned entities are active (`true`) or not (`false`).")
+	cmd.Flags().String("after", "", "Return entities after the specified Paddle ID when working with paginated endpoints. Used in the 'meta.pagination.next' URL in responses for list operations.")
+	cmd.Flags().Int("per-page", 200, "Set how many entities are returned per page. Paddle returns the maximum number of results if a number greater than the maximum is requested. Check 'meta.pagination.per_page' in the response to see how many were returned.\n\nDefault: '200'; Maximum: '200'.")
+	cmd.Flags().String("order-by", "", "Order returned entities by the specified field and direction ('[ASC]' or '[DESC]'). For example, '?order_by=id[ASC]'.\n\nValid fields for ordering: 'id'.")
+	cmd.Flags().Bool("active", false, "Determine whether returned entities are active ('true') or not ('false').")
 	cmd.Flags().String("traffic-source", "", "Return entities that match the specified traffic source.")
 
 	return cmd
