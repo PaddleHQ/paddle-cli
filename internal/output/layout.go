@@ -183,20 +183,19 @@ func objectLayout(o *object, columns []ColumnDef) layout {
 
 // mapRows turns an object keyed by data, such as currency codes, whose values
 // all share one shape into a row per key. A lone field holding such an object
-// (payment_methods, say) is unwrapped first.
+// (payment_methods, say) is unwrapped first, so a lone top-level object field
+// is never itself read as a map of one row.
 func mapRows(o *object) ([]*object, []string, bool) {
 	if len(o.keys) == 1 {
 		if inner, ok := o.vals[o.keys[0]].(*object); ok {
-			return sameShapeRows(inner, 1)
+			return sameShapeRows(inner)
 		}
 	}
-	return sameShapeRows(o, 2)
+	return sameShapeRows(o)
 }
 
-// sameShapeRows needs at least minEntries keys: a lone top-level object field
-// looks like any single object, but one wrapped in a field is still a map.
-func sameShapeRows(o *object, minEntries int) ([]*object, []string, bool) {
-	if len(o.keys) < minEntries {
+func sameShapeRows(o *object) ([]*object, []string, bool) {
+	if len(o.keys) == 0 {
 		return nil, nil, false
 	}
 	shape := []string(nil)
@@ -374,7 +373,7 @@ func fieldCell(v any, opts Options) string {
 	var lines []string
 	if s, ok := scalarText(v); ok {
 		for p := range strings.SplitSeq(s, "\n") {
-			pieces, cut := capPieces(strings.Fields(p), opts)
+			pieces, cut := capPieces(strings.Split(p, " "), opts)
 			lines = append(lines, packLines(pieces, " ", lineWidth)...)
 			if cut {
 				break
@@ -421,7 +420,7 @@ func jsonPieces(j string) []string {
 func capPieces(pieces []string, opts Options) ([]string, bool) {
 	limit := lineWidth * maxLines
 	for i, p := range pieces {
-		if strings.Contains(p, "http://") || strings.Contains(p, "https://") {
+		if lenOutsideURLs(p) <= limit {
 			continue
 		}
 		if r := []rune(p); len(r) > limit {
@@ -435,15 +434,27 @@ func capPieces(pieces []string, opts Options) ([]string, bool) {
 	return pieces, false
 }
 
+// lenOutsideURLs counts a piece's characters outside its URLs, so a JSON piece
+// that holds a long note as well as a URL is still capped.
+func lenOutsideURLs(p string) int {
+	n := 0
+	for tok := range strings.FieldsSeq(p) {
+		if !strings.Contains(tok, "http://") && !strings.Contains(tok, "https://") {
+			n += utf8.RuneCountInString(tok) + 1
+		}
+	}
+	return n
+}
+
 // packLines joins pieces into lines of at most width; a piece longer than
 // width gets a line of its own rather than being split.
 func packLines(pieces []string, sep string, width int) []string {
 	var lines []string
-	line := ""
+	line, started := "", false
 	for _, p := range pieces {
 		switch {
-		case line == "":
-			line = p
+		case !started:
+			line, started = p, true
 		case utf8.RuneCountInString(line+sep+p) <= width:
 			line += sep + p
 		default:

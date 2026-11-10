@@ -73,6 +73,14 @@ func TestPrint_ObjectsOfDifferentShapesStayOneObject(t *testing.T) {
 	if !strings.HasPrefix(out, "A,B\n") {
 		t.Errorf("objects of different shapes aren't a map of rows; got:\n%s", out)
 	}
+
+	// Their own key field would overwrite the KEY column.
+	if out := render(t, FormatCSV, `{"data":{"a":{"key":"x","v":1},"b":{"key":"y","v":2}}}`, Options{}); !strings.HasPrefix(out, "A,B\n") {
+		t.Errorf("objects with a key field aren't a map of rows; got:\n%s", out)
+	}
+	if out := render(t, FormatCSV, `{"data":{}}`, Options{}); strings.Contains(out, "KEY") {
+		t.Errorf("an empty object isn't a map of rows; got:\n%s", out)
+	}
 }
 
 func TestPrint_SoleArrayOfObjectsBecomesRows(t *testing.T) {
@@ -159,6 +167,12 @@ func TestPrint_EntityWithOneArrayStaysOneObject(t *testing.T) {
 	out := render(t, FormatTable, input, Options{})
 	if lineWith(out, "FIELD", "VALUE") == "" || lineWith(out, "items", `[{"status":"active","quantity":1}]`) == "" {
 		t.Errorf("table should show the subscription vertically, items as a value:\n%s", out)
+	}
+
+	// The id alone keeps it one object, even when the items share no names with it.
+	distinct := `{"data":{"id":"sub_01","status":"active","items":[{"quantity":1,"price_id":"pri_1"}]}}`
+	if got := render(t, FormatCSV, distinct, Options{}); !strings.HasPrefix(got, "ID,STATUS,ITEMS\n") {
+		t.Errorf("an entity should stay one object; got:\n%s", got)
 	}
 }
 
@@ -258,6 +272,22 @@ func TestFieldCell(t *testing.T) {
 		}
 		if !strings.HasPrefix(long, strings.TrimSuffix(strings.ReplaceAll(got, "\n", " "), "...")) {
 			t.Errorf("the lines shown should be the start of the text, words whole:\n%s", got)
+		}
+	})
+
+	t.Run("spacing and indentation are kept", func(t *testing.T) {
+		in := "line one   with  spaces\n\n  indented"
+		if got := fieldCell(in, Options{}); got != in {
+			t.Errorf("expected the text as is, got %q", got)
+		}
+	})
+
+	t.Run("a URL in JSON doesn't exempt the rest of its piece from the cap", func(t *testing.T) {
+		var truncated bool
+		v := []any{&object{keys: []string{"note"}, vals: map[string]any{"note": strings.Repeat("x", 400) + " https://example.com"}}}
+		got := fieldCell(v, Options{Truncated: &truncated})
+		if !strings.HasSuffix(got, "...") || !truncated {
+			t.Errorf("expected the note cut and Truncated set; got %d chars", len(got))
 		}
 	})
 
@@ -369,6 +399,12 @@ func TestPrint_PreviewWithItemsStaysOneObject(t *testing.T) {
 	clash := `{"data":{"status":"draft","lines":[{"status":"active","quantity":1}]}}`
 	if got := render(t, FormatCSV, clash, Options{}); !strings.HasPrefix(got, "STATUS,LINES\n") {
 		t.Errorf("a name shared by the object and its rows should keep it one object; got:\n%s", got)
+	}
+
+	// An object field alone keeps it one object, even when the items share no names with it.
+	distinct := `{"data":{"currency_code":"GBP","billing_cycle":{"interval":"month","frequency":1},"items":[{"quantity":1,"price_id":"pri_1"}]}}`
+	if got := render(t, FormatCSV, distinct, Options{}); !strings.HasPrefix(got, "CURRENCY_CODE,BILLING_CYCLE,ITEMS\n") {
+		t.Errorf("an object field beside the array should keep it one object; got:\n%s", got)
 	}
 }
 
