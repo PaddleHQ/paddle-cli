@@ -54,7 +54,7 @@ func TestVersionCmd_Table(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, want := range []string{"VERSION", "COMMIT"} {
+	for _, want := range []string{"version", "commit"} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("expected %q in table output, got: %s", want, buf.String())
 		}

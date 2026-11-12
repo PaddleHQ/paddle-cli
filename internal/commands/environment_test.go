@@ -91,7 +91,7 @@ func TestEnvironmentCmd_Table(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
-	for _, want := range []string{"ENVIRONMENT", "API_URL", configtest.TestEnv} {
+	for _, want := range []string{"environment", "api_url", configtest.TestEnv} {
 		if !strings.Contains(buf.String(), want) {
 			t.Errorf("expected %q in table output, got: %s", want, buf.String())
 		}

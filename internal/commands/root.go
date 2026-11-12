@@ -107,6 +107,7 @@ func (r *Root) setup(cmd *cobra.Command, _ []string) error {
 	if err != nil {
 		return err
 	}
+	opts.Truncated = new(bool)
 	*r.OutputPtr = opts
 
 	r.Environment = resolved.CurrentEnvironment
