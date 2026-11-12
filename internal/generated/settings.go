@@ -756,7 +756,7 @@ func settingsCheckoutUrlUpdateColumns() []output.ColumnDef {
 	return nil
 }
 
-const settingsCheckoutUrlUpdateBodySchema = "{\"additionalProperties\":false,\"description\":\"Represents the checkout URL settings for your account when updating them.\",\"properties\":{\"default_url\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}],\"description\":\"URL that Paddle opens when a checkout is created without a URL of its own. Pass `null` to clear it.\\n\\nMust use `https`, and its domain must be an approved checkout domain for your account.\\n\\nPaddle appends `?_ptxn=` and the transaction ID to this URL. The page must have Paddle.js set up to read it and open the checkout.\",\"format\":\"uri\"}},\"type\":\"object\"}"
+const settingsCheckoutUrlUpdateBodySchema = "{\"additionalProperties\":false,\"description\":\"Represents the checkout URL settings for your account when updating them.\",\"properties\":{\"default_url\":{\"anyOf\":[{\"type\":\"string\"},{\"type\":\"null\"}],\"description\":\"URL that Paddle opens when a checkout is created without a URL of its own. Pass `null` to clear it.\\n\\nMust use `https`. In live accounts, its domain must also be an approved checkout domain for your account.\\n\\nPaddle appends `?_ptxn=` and the transaction ID to this URL. The page must have Paddle.js set up to read it and open the checkout.\",\"format\":\"uri\"}},\"type\":\"object\"}"
 
 // newSettingsCurrencyConversionsCmd returns the settings currency-conversions parent command.
 func newSettingsCurrencyConversionsCmd(c *client.Client, opts *output.Options) *cobra.Command {

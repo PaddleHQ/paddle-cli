@@ -11,7 +11,7 @@ import (
 func NewIpAddressesCmd(c *client.Client, opts *output.Options) *cobra.Command {
 	cmd := &cobra.Command{
 		Use:   "ip-addresses",
-		Short: "Get Paddle IP addresses.",
+		Short: "IP addresses are the Paddle IP addresses for the environment that you make the request in. You can add them to your allowlist.",
 	}
 
 	cmd.AddCommand(newIpAddressesGetCmd(c, opts))
